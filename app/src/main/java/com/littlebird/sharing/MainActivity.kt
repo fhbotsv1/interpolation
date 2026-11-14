@@ -70,6 +70,12 @@ class MainActivity : ComponentActivity() {
     private var downloadSpeed by mutableStateOf("0 B/s")
     private var connectedClients by mutableStateOf<List<ConnectedClient>>(emptyList())
     private var transferHistory by mutableStateOf<List<TransferHistoryItem>>(emptyList())
+    private var showConnectedDetails by mutableStateOf(false)
+    private var expandedClientTokens by mutableStateOf<Set<String>>(emptySet())
+    private var showReceivedFiles by mutableStateOf(false)
+    private var showTransferHistory by mutableStateOf(false)
+    private var showClearReceivedDialog by mutableStateOf(false)
+    private var showClearHistoryDialog by mutableStateOf(false)
 
     private val speedUpdater = object : Runnable {
         override fun run() {
@@ -179,28 +185,61 @@ class MainActivity : ComponentActivity() {
                         if (isServerRunning) {
                             Card(Modifier.fillMaxWidth()) {
                                 Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                                    Text("CONNECTED DEVICES", style = MaterialTheme.typography.labelLarge)
+                                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                        Text("CONNECTED DEVICES", style = MaterialTheme.typography.labelLarge)
+                                        TextButton(onClick = { showConnectedDetails = !showConnectedDetails }) {
+                                            Text(if (showConnectedDetails) "Hide details" else "Connected details")
+                                        }
+                                    }
                                     Text(
                                         if (connectedClients.isEmpty()) "No authenticated devices are active." else
                                             "${connectedClients.size} device(s) currently connected.",
                                         style = MaterialTheme.typography.bodyMedium
                                     )
-                                    connectedClients.forEach { client ->
-                                        Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                                            Text(client.ipAddress, style = MaterialTheme.typography.titleSmall)
-                                            Text(client.deviceInfo, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2)
-                                            Text(
-                                                "Connected ${formatTimestamp(client.connectedAt)} · Active ${formatTimestamp(client.lastSeen)}",
-                                                style = MaterialTheme.typography.labelSmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
+                                    if (showConnectedDetails) {
+                                        connectedClients.forEach { client ->
+                                            Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                                    Text(client.ipAddress, style = MaterialTheme.typography.titleSmall)
+                                                    TextButton(onClick = {
+                                                        expandedClientTokens = if (expandedClientTokens.contains(client.token))
+                                                            expandedClientTokens - client.token else expandedClientTokens + client.token
+                                                    }) {
+                                                        Text(if (expandedClientTokens.contains(client.token)) "Hide" else "Details")
+                                                    }
+                                                }
+                                                if (expandedClientTokens.contains(client.token)) {
+                                                    Text(client.deviceInfo, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                                    Text(
+                                                        "Connected ${formatTimestamp(client.connectedAt)} · Last active ${formatTimestamp(client.lastSeen)}",
+                                                        style = MaterialTheme.typography.labelSmall,
+                                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                    )
+                                                }
+                                                OutlinedButton(onClick = {
+                                                    server?.disconnectClient(client.token)
+                                                    connectedClients = server?.getConnectedClients().orEmpty()
+                                                    expandedClientTokens = expandedClientTokens - client.token
+                                                }) { Text("Disconnect device") }
+                                            }
+                                            androidx.compose.material3.HorizontalDivider()
                                         }
+                                        if (connectedClients.isNotEmpty()) {
+                                            OutlinedButton(
+                                                onClick = {
+                                                    server?.disconnectAllClients()
+                                                    connectedClients = emptyList()
+                                                    expandedClientTokens = emptySet()
+                                                },
+                                                modifier = Modifier.fillMaxWidth()
+                                            ) { Text("Disconnect all devices") }
+                                        }
+                                        Text(
+                                            "Device details use its network address and browser information. Inactive devices are removed after 30 seconds.",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
                                     }
-                                    Text(
-                                        "Device details are based on its network address and browser information. Devices inactive for 30 seconds disappear from this list.",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
                                 }
                             }
                         }
@@ -234,58 +273,57 @@ class MainActivity : ComponentActivity() {
 
                         Card(Modifier.fillMaxWidth()) {
                             Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Text("RECEIVED FILES", style = MaterialTheme.typography.labelLarge)
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text("RECEIVED FILES", style = MaterialTheme.typography.labelLarge)
+                                    TextButton(onClick = { showReceivedFiles = !showReceivedFiles }) {
+                                        Text(if (showReceivedFiles) "Hide details" else "Show details")
+                                    }
+                                }
                                 Text(
                                     if (receivedFiles.isEmpty()) "No files received yet." else "${receivedFiles.size} file(s) received on this phone.",
                                     style = MaterialTheme.typography.bodyMedium
                                 )
-                                receivedFiles.takeLast(10).reversed().forEach { file ->
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween
-                                    ) {
-                                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                            Text(file.name, style = MaterialTheme.typography.bodyMedium)
-                                            Text(formatFileSize(file.size), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                        }
-                                        OutlinedButton(onClick = { openReceivedFile(file) }) {
-                                            Text("Open")
+                                if (showReceivedFiles) {
+                                    if (receivedFiles.isNotEmpty()) {
+                                        TextButton(onClick = { showClearReceivedDialog = true }) { Text("Clear received files") }
+                                    }
+                                    receivedFiles.takeLast(10).reversed().forEach { file ->
+                                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                                Text(file.name, style = MaterialTheme.typography.bodyMedium)
+                                                Text(formatFileSize(file.size), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                            }
+                                            OutlinedButton(onClick = { openReceivedFile(file) }) { Text("Open") }
                                         }
                                     }
-                                }
-                                if (receivedFiles.size > 10) {
-                                    Text("Showing the 10 most recent uploads.", style = MaterialTheme.typography.bodySmall)
+                                    if (receivedFiles.size > 10) Text("Showing the 10 most recent uploads.", style = MaterialTheme.typography.bodySmall)
                                 }
                             }
                         }
 
                         Card(Modifier.fillMaxWidth()) {
                             Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                                Text("TRANSFER HISTORY", style = MaterialTheme.typography.labelLarge)
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Text("TRANSFER HISTORY", style = MaterialTheme.typography.labelLarge)
+                                    TextButton(onClick = { showTransferHistory = !showTransferHistory }) {
+                                        Text(if (showTransferHistory) "Hide details" else "Show details")
+                                    }
+                                }
                                 Text(
-                                    if (transferHistory.isEmpty()) "Completed transfers will appear here." else
-                                        "${transferHistory.size} recent transfer(s).",
+                                    if (transferHistory.isEmpty()) "Completed transfers will appear here." else "${transferHistory.size} recent transfer(s).",
                                     style = MaterialTheme.typography.bodyMedium
                                 )
-                                transferHistory.take(20).forEach { item ->
-                                    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                                        Text(item.name, style = MaterialTheme.typography.bodyMedium)
-                                        Text(
-                                            "${item.direction} · ${formatFileSize(item.size)}",
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.primary
-                                        )
-                                        Text(
-                                            "${item.clientIp} · ${formatTimestamp(item.timestamp)}",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                        Text(
-                                            item.deviceInfo,
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            maxLines = 2
-                                        )
+                                if (showTransferHistory) {
+                                    if (transferHistory.isNotEmpty()) {
+                                        TextButton(onClick = { showClearHistoryDialog = true }) { Text("Clear history") }
+                                    }
+                                    transferHistory.take(20).forEach { item ->
+                                        Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                            Text(item.name, style = MaterialTheme.typography.bodyMedium)
+                                            Text("${item.direction} · ${formatFileSize(item.size)}", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.primary)
+                                            Text("${item.clientIp} · ${formatTimestamp(item.timestamp)}", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                            Text(item.deviceInfo, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2)
+                                        }
                                     }
                                 }
                             }
@@ -324,6 +362,43 @@ class MainActivity : ComponentActivity() {
                         Spacer(Modifier.height(8.dp))
                     }
                 }
+            }
+
+            if (showClearHistoryDialog) {
+                AlertDialog(
+                    onDismissRequest = { showClearHistoryDialog = false },
+                    title = { Text("Clear transfer history?") },
+                    text = { Text("This removes the saved transfer records from this app. It does not delete transferred files.") },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            transferHistory = emptyList()
+                            getSharedPreferences("sharing_history", MODE_PRIVATE).edit().remove("transfer_history").apply()
+                            showClearHistoryDialog = false
+                        }) { Text("Clear history") }
+                    },
+                    dismissButton = { TextButton(onClick = { showClearHistoryDialog = false }) { Text("Cancel") } }
+                )
+            }
+            if (showClearReceivedDialog) {
+                AlertDialog(
+                    onDismissRequest = { showClearReceivedDialog = false },
+                    title = { Text("Delete received files?") },
+                    text = { Text("This permanently deletes files saved in Downloads/Little Bird Sharing. Files opened or copied elsewhere are not affected.") },
+                    confirmButton = {
+                        TextButton(onClick = {
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                                receivedFiles.forEach { file ->
+                                    runCatching { contentResolver.delete(Uri.parse(file.path), null, null) }
+                                }
+                            } else {
+                                receivedFiles.forEach { file -> runCatching { File(file.path).delete() } }
+                            }
+                            loadReceivedFiles()
+                            showClearReceivedDialog = false
+                        }) { Text("Delete files") }
+                    },
+                    dismissButton = { TextButton(onClick = { showClearReceivedDialog = false }) { Text("Cancel") } }
+                )
             }
 
             selectedQrAddress?.let { url ->
