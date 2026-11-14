@@ -230,7 +230,7 @@ class MainActivity : ComponentActivity() {
         statusMessage = "Starting server…"
         thread(name = "sharing-server-start") {
             try {
-                val newServer = LocalFileServer(this) { sharedFiles }
+                val newServer = LocalFileServer(this, { sharedFiles })
                 newServer.start(SOCKET_TIMEOUT, false)
                 server = newServer
                 val addresses = getLocalIpv4Addresses()
