@@ -13,6 +13,9 @@ import org.json.JSONObject
 import java.io.InputStream
 import java.io.File
 import java.net.URLEncoder
+import java.security.MessageDigest
+import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 
 data class SharedFile(
     val uri: Uri,
@@ -31,8 +34,12 @@ class LocalFileServer(
     private val context: Context,
     private val getSharedFiles: () -> List<SharedFile>,
     private val onFileReceived: (ReceivedFile) -> Unit = {},
+    private val accessPin: String,
     port: Int = DEFAULT_PORT
 ) : NanoHTTPD("0.0.0.0", port) {
+
+    private val activeTokens = ConcurrentHashMap.newKeySet<String>()
+    private val pinHash = sha256(accessPin)
 
     override fun serve(session: IHTTPSession): Response {
         return try {
@@ -40,11 +47,13 @@ class LocalFileServer(
                 session.uri == "/health" ->
                     newFixedLengthResponse(Response.Status.OK, MIME_PLAINTEXT, "OK")
 
-                session.uri == "/api/files" -> serveFileList()
+                session.uri == "/auth" && session.method == Method.POST -> serveAuth(session)
 
-                session.uri == "/upload" && session.method == Method.POST -> serveUpload(session)
+                session.uri == "/api/files" -> if (isAuthorized(session)) serveFileList() else unauthorized()
 
-                session.uri.startsWith("/download/") -> serveDownload(session.uri)
+                session.uri == "/upload" && session.method == Method.POST -> if (isAuthorized(session)) serveUpload(session) else unauthorized()
+
+                session.uri.startsWith("/download/") -> if (isAuthorized(session)) serveDownload(session.uri) else unauthorized()
 
                 else -> newFixedLengthResponse(
                     Response.Status.OK,
@@ -62,6 +71,38 @@ class LocalFileServer(
             )
         }
     }
+
+
+    private fun serveAuth(session: IHTTPSession): Response {
+        return try {
+            val body = HashMap<String, String>()
+            session.parseBody(body)
+            val suppliedPin = session.parameters["pin"]?.firstOrNull().orEmpty()
+            if (suppliedPin.isBlank() || !MessageDigest.isEqual(sha256(suppliedPin), pinHash)) {
+                return newFixedLengthResponse(Response.Status.UNAUTHORIZED, MIME_PLAINTEXT, "Incorrect PIN")
+            }
+            val token = UUID.randomUUID().toString()
+            activeTokens.add(token)
+            newFixedLengthResponse(Response.Status.OK, "application/json; charset=utf-8",
+                JSONObject().put("token", token).toString()).apply {
+                addHeader("Cache-Control", "no-store")
+            }
+        } catch (error: Exception) {
+            newFixedLengthResponse(Response.Status.BAD_REQUEST, MIME_PLAINTEXT, "Unable to verify PIN")
+        }
+    }
+
+    private fun isAuthorized(session: IHTTPSession): Boolean {
+        val token = session.headers["x-auth-token"] ?: session.parameters["token"]?.firstOrNull()
+        return activeTokens.contains(token)
+    }
+
+    private fun unauthorized(): Response = newFixedLengthResponse(
+        Response.Status.UNAUTHORIZED, MIME_PLAINTEXT, "PIN authentication required"
+    )
+
+    private fun sha256(value: String): ByteArray =
+        MessageDigest.getInstance("SHA-256").digest(value.toByteArray(Charsets.UTF_8))
 
     private fun serveFileList(): Response {
         val filesJson = JSONArray()
@@ -254,6 +295,13 @@ class LocalFileServer(
               <h1>Little Bird Sharing</h1>
               <p>Files shared from the host device</p>
             </header>
+            <section id="pin-panel" class="upload-panel">
+              <h2>Enter host PIN</h2>
+              <input id="pin-input" type="password" inputmode="numeric" autocomplete="current-password" placeholder="4–12 digit PIN" maxlength="12">
+              <button class="upload" id="pin-button" type="button">Connect securely</button>
+              <div id="pin-status" role="status"></div>
+            </section>
+            <div id="protected-content" hidden>
             <h2 class="section-title">Upload files to this phone</h2>
             <section class="upload-panel">
               <input id="upload-input" type="file" multiple>
@@ -263,10 +311,33 @@ class LocalFileServer(
             </section>
             <h2 class="section-title">Available files</h2>
             <section id="file-list"><div id="empty">Loading files…</div></section>
-            <footer>File list refreshes automatically every 5 seconds.</footer>
+            </div>
+            <footer>Enter the PIN set on the host phone to access shared files.</footer>
           </main>
           <script>
             const list = document.getElementById('file-list');
+            const pinPanel = document.getElementById('pin-panel');
+            const protectedContent = document.getElementById('protected-content');
+            const pinInput = document.getElementById('pin-input');
+            const pinStatus = document.getElementById('pin-status');
+            let authToken = localStorage.getItem('lb-sharing-token') || '';
+            async function authenticate() {
+              pinStatus.textContent = 'Checking PIN…';
+              try {
+                const response = await fetch('/auth', {method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:new URLSearchParams({pin:pinInput.value})});
+                if (!response.ok) throw new Error('Incorrect PIN. Try again.');
+                const data = await response.json();
+                authToken = data.token;
+                localStorage.setItem('lb-sharing-token', authToken);
+                pinPanel.hidden = true;
+                protectedContent.hidden = false;
+                refreshFiles();
+              } catch (error) { pinStatus.textContent = error.message; }
+            }
+            document.getElementById('pin-button').addEventListener('click', authenticate);
+            pinInput.addEventListener('keydown', event => { if (event.key === 'Enter') authenticate(); });
+            if (authToken) { pinPanel.hidden = true; protectedContent.hidden = false; }
+            function authHeaders() { return {'X-Auth-Token':authToken}; }
             const uploadInput = document.getElementById('upload-input');
             const uploadButton = document.getElementById('upload-button');
             const uploadStatus = document.getElementById('upload-status');
@@ -284,6 +355,7 @@ class LocalFileServer(
                     form.append('file', file, file.name);
                     const xhr = new XMLHttpRequest();
                     xhr.open('POST', '/upload');
+                    xhr.setRequestHeader('X-Auth-Token', authToken);
                     xhr.upload.onprogress = event => {
                       if (event.lengthComputable) {
                         const overall = ((completed + event.loaded / event.total) / files.length) * 100;
@@ -315,7 +387,8 @@ class LocalFileServer(
             }
             async function refreshFiles() {
               try {
-                const response = await fetch('/api/files', { cache: 'no-store' });
+                const response = await fetch('/api/files', {cache:'no-store', headers:authHeaders()});
+                if (response.status === 401) { localStorage.removeItem('lb-sharing-token'); authToken=''; pinPanel.hidden=false; protectedContent.hidden=true; throw new Error('Please enter the host PIN again.'); }
                 if (!response.ok) throw new Error('Could not load files');
                 const data = await response.json();
                 list.replaceChildren();
@@ -340,7 +413,7 @@ class LocalFileServer(
                   info.append(name, size);
                   const link = document.createElement('a');
                   link.className = 'download';
-                  link.href = '/download/' + encodeURIComponent(file.id);
+                  link.href = '/download/' + encodeURIComponent(file.id) + '?token=' + encodeURIComponent(authToken);
                   link.textContent = 'Download';
                   card.append(info, link);
                   list.appendChild(card);
@@ -353,8 +426,8 @@ class LocalFileServer(
                 list.appendChild(empty);
               }
             }
-            refreshFiles();
-            setInterval(refreshFiles, 5000);
+            if (authToken) refreshFiles();
+            setInterval(() => { if (authToken) refreshFiles(); }, 5000);
           </script>
         </body>
         </html>
