@@ -3,11 +3,14 @@ package com.littlebird.sharing
 import android.graphics.Bitmap
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
+import android.content.ContentUris
 import androidx.core.content.FileProvider
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.provider.OpenableColumns
+import android.provider.MediaStore
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -190,7 +193,7 @@ class MainActivity : ComponentActivity() {
 
                         Text("Stage 3: upload to this phone", style = MaterialTheme.typography.titleMedium)
                         Text(
-                            "Connected devices can now select files on the webpage and upload them to this phone. Received files are stored in the app private Downloads/Received folder.",
+                            "Connected devices can now select files on the webpage and upload them to this phone. Received files are saved to the public Downloads/Little Bird Sharing folder.",
                             style = MaterialTheme.typography.bodyMedium
                         )
                         Text("Stage 2: browse and download", style = MaterialTheme.typography.titleMedium)
@@ -229,32 +232,70 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun loadReceivedFiles() {
-        val directory = File(
-            getExternalFilesDir(android.os.Environment.DIRECTORY_DOWNLOADS) ?: filesDir,
-            "Received"
-        )
-        receivedFiles = directory.listFiles()
-            ?.filter { it.isFile }
-            ?.sortedBy { it.lastModified() }
-            ?.map { file -> ReceivedFile(file.name, file.length(), file.absolutePath) }
-            ?: emptyList()
+        receivedFiles = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+            val files = mutableListOf<ReceivedFile>()
+            val collection = MediaStore.Downloads.EXTERNAL_CONTENT_URI
+            val projection = arrayOf(
+                MediaStore.Downloads._ID,
+                MediaStore.Downloads.DISPLAY_NAME,
+                MediaStore.Downloads.SIZE
+            )
+            contentResolver.query(
+                collection,
+                projection,
+                "${MediaStore.Downloads.RELATIVE_PATH} = ?",
+                arrayOf(android.os.Environment.DIRECTORY_DOWNLOADS + "/Little Bird Sharing/"),
+                "${MediaStore.Downloads.DATE_ADDED} DESC"
+            )?.use { cursor ->
+                val idColumn = cursor.getColumnIndexOrThrow(MediaStore.Downloads._ID)
+                val nameColumn = cursor.getColumnIndexOrThrow(MediaStore.Downloads.DISPLAY_NAME)
+                val sizeColumn = cursor.getColumnIndexOrThrow(MediaStore.Downloads.SIZE)
+                while (cursor.moveToNext()) {
+                    val uri = ContentUris.withAppendedId(collection, cursor.getLong(idColumn))
+                    files.add(
+                        ReceivedFile(
+                            cursor.getString(nameColumn) ?: "Received file",
+                            if (cursor.isNull(sizeColumn)) 0L else cursor.getLong(sizeColumn),
+                            uri.toString()
+                        )
+                    )
+                }
+            }
+            files.reversed()
+        } else {
+            val directory = File(
+                getExternalFilesDir(android.os.Environment.DIRECTORY_DOWNLOADS) ?: filesDir,
+                "Received"
+            )
+            directory.listFiles()
+                ?.filter { it.isFile }
+                ?.sortedBy { it.lastModified() }
+                ?.map { file -> ReceivedFile(file.name, file.length(), file.absolutePath) }
+                ?: emptyList()
+        }
     }
 
     private fun openReceivedFile(received: ReceivedFile) {
-        val file = File(received.path)
-        if (!file.exists()) {
-            statusMessage = "File not found: ${received.name}"
-            return
-        }
         try {
-            val contentUri = FileProvider.getUriForFile(
-                this,
-                "${applicationContext.packageName}.provider",
-                file
-            )
-            val extension = file.extension.lowercase()
-            val mimeType = android.webkit.MimeTypeMap.getSingleton()
-                .getMimeTypeFromExtension(extension) ?: "*/*"
+            val contentUri: Uri
+            val mimeType: String
+            if (received.path.startsWith("content://")) {
+                contentUri = Uri.parse(received.path)
+                mimeType = contentResolver.getType(contentUri) ?: "*/*"
+            } else {
+                val file = File(received.path)
+                if (!file.exists()) {
+                    statusMessage = "File not found: ${received.name}"
+                    return
+                }
+                contentUri = FileProvider.getUriForFile(
+                    this,
+                    "${applicationContext.packageName}.provider",
+                    file
+                )
+                mimeType = android.webkit.MimeTypeMap.getSingleton()
+                    .getMimeTypeFromExtension(file.extension.lowercase()) ?: "*/*"
+            }
             val intent = Intent(Intent.ACTION_VIEW).apply {
                 setDataAndType(contentUri, mimeType)
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
