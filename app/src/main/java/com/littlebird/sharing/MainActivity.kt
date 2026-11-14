@@ -4,8 +4,11 @@ import android.graphics.Bitmap
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.provider.OpenableColumns
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -47,10 +50,31 @@ class MainActivity : ComponentActivity() {
     private var statusMessage by mutableStateOf("Server is stopped")
     private var hostAddresses by mutableStateOf(emptyList<String>())
     private var selectedQrAddress by mutableStateOf<String?>(null)
+    private var sharedFiles by mutableStateOf<List<SharedFile>>(emptyList())
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
+            val filePicker = rememberLauncherForActivityResult(
+                contract = ActivityResultContracts.OpenMultipleDocuments()
+            ) { uris ->
+                val updated = sharedFiles.toMutableList()
+                uris.forEach { uri ->
+                    try {
+                        contentResolver.takePersistableUriPermission(
+                            uri,
+                            android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION
+                        )
+                    } catch (_: Exception) {
+                        // Some document providers do not offer persistable permissions.
+                    }
+                    if (updated.none { it.uri == uri }) {
+                        updated.add(readSharedFile(uri))
+                    }
+                }
+                sharedFiles = updated
+            }
+
             MaterialTheme {
                 Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.background) {
                     Column(
@@ -59,6 +83,7 @@ class MainActivity : ComponentActivity() {
                     ) {
                         Text("Little Bird Sharing", style = MaterialTheme.typography.headlineMedium)
                         Text("Turn this phone into a file-sharing host.", style = MaterialTheme.typography.bodyLarge)
+
                         Card(
                             Modifier.fillMaxWidth(),
                             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
@@ -73,6 +98,7 @@ class MainActivity : ComponentActivity() {
                                 Text(statusMessage)
                             }
                         }
+
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                             Button(onClick = { startServer() }, enabled = !isServerRunning, modifier = Modifier.weight(1f)) {
                                 Text("Start server")
@@ -81,6 +107,34 @@ class MainActivity : ComponentActivity() {
                                 Text("Stop server")
                             }
                         }
+
+                        Card(Modifier.fillMaxWidth()) {
+                            Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                Text("SHARED FILES", style = MaterialTheme.typography.labelLarge)
+                                Text(
+                                    if (sharedFiles.isEmpty()) "No files selected yet." else "${sharedFiles.size} file(s) ready to share.",
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                                Button(
+                                    onClick = { filePicker.launch(arrayOf("*/*")) },
+                                    modifier = Modifier.fillMaxWidth()
+                                ) {
+                                    Text("Add files")
+                                }
+                                if (sharedFiles.isNotEmpty()) {
+                                    sharedFiles.forEach { file ->
+                                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                            Text(file.name, style = MaterialTheme.typography.bodyMedium)
+                                            Text(formatFileSize(file.size), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        }
+                                    }
+                                    TextButton(onClick = { sharedFiles = emptyList() }) {
+                                        Text("Remove all shared files")
+                                    }
+                                }
+                            }
+                        }
+
                         if (isServerRunning) {
                             Card(Modifier.fillMaxWidth()) {
                                 Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -100,12 +154,16 @@ class MainActivity : ComponentActivity() {
                                 }
                             }
                         }
-                        Spacer(Modifier.height(8.dp))
-                        Text("Stage 1: server setup", style = MaterialTheme.typography.titleMedium)
+
+                        Text("Stage 2: browse and download", style = MaterialTheme.typography.titleMedium)
                         Text(
-                            "This milestone verifies that another device can reach the phone. File browsing, downloads, uploads, QR connection and hotspot mode will be added step by step.",
+                            "Select files above. Devices connected to this phone can open its address to view and download the shared files. The webpage refreshes its file list automatically.",
                             style = MaterialTheme.typography.bodyMedium
                         )
+                        Spacer(Modifier.height(8.dp))
+                    }
+                }
+            }
 
             selectedQrAddress?.let { url ->
                 val qrBitmap = remember(url) { createQrBitmap(url) }
@@ -129,12 +187,32 @@ class MainActivity : ComponentActivity() {
                     }
                 )
             }
-                    }
-                }
+        }
+    }
+
+    private fun readSharedFile(uri: android.net.Uri): SharedFile {
+        var name = "Shared file"
+        var size = -1L
+        contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+            if (cursor.moveToFirst()) {
+                val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                if (nameIndex >= 0) name = cursor.getString(nameIndex) ?: name
+                val sizeIndex = cursor.getColumnIndex(OpenableColumns.SIZE)
+                if (sizeIndex >= 0 && !cursor.isNull(sizeIndex)) size = cursor.getLong(sizeIndex)
             }
         }
+        val mimeType = contentResolver.getType(uri) ?: "application/octet-stream"
+        return SharedFile(uri, name, size, mimeType)
+    }
 
-
+    private fun formatFileSize(size: Long): String {
+        if (size < 0) return "Size unavailable"
+        if (size < 1024) return "$size B"
+        val kb = size / 1024.0
+        if (kb < 1024) return String.format("%.1f KB", kb)
+        val mb = kb / 1024.0
+        if (mb < 1024) return String.format("%.1f MB", mb)
+        return String.format("%.2f GB", mb / 1024.0)
     }
 
     private fun createQrBitmap(content: String): Bitmap {
@@ -152,7 +230,7 @@ class MainActivity : ComponentActivity() {
         statusMessage = "Starting server…"
         thread(name = "sharing-server-start") {
             try {
-                val newServer = LocalFileServer()
+                val newServer = LocalFileServer(this) { sharedFiles }
                 newServer.start(SOCKET_TIMEOUT, false)
                 server = newServer
                 val addresses = getLocalIpv4Addresses()
@@ -205,5 +283,7 @@ class MainActivity : ComponentActivity() {
         super.onDestroy()
     }
 
-    companion object { private const val SOCKET_TIMEOUT = 5_000 }
+    companion object {
+        private const val SOCKET_TIMEOUT = 5_000
+    }
 }
