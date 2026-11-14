@@ -46,6 +46,11 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.qrcode.QRCodeWriter
+import org.json.JSONArray
+import org.json.JSONObject
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import java.net.Inet4Address
 import java.net.NetworkInterface
 import java.io.File
@@ -63,6 +68,8 @@ class MainActivity : ComponentActivity() {
     private var accessPin by mutableStateOf("")
     private var uploadSpeed by mutableStateOf("0 B/s")
     private var downloadSpeed by mutableStateOf("0 B/s")
+    private var connectedClients by mutableStateOf<List<ConnectedClient>>(emptyList())
+    private var transferHistory by mutableStateOf<List<TransferHistoryItem>>(emptyList())
 
     private val speedUpdater = object : Runnable {
         override fun run() {
@@ -70,6 +77,7 @@ class MainActivity : ComponentActivity() {
                 uploadSpeed = formatTransferRate(speeds.uploadBytesPerSecond)
                 downloadSpeed = formatTransferRate(speeds.downloadBytesPerSecond)
             }
+            connectedClients = server?.getConnectedClients().orEmpty()
             if (isServerRunning) mainHandler.postDelayed(this, 1000)
         }
     }
@@ -77,6 +85,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         loadReceivedFiles()
+        loadTransferHistory()
         accessPin = getSharedPreferences("sharing_security", MODE_PRIVATE).getString("access_pin", "").orEmpty()
         setContent {
             val filePicker = rememberLauncherForActivityResult(
@@ -167,6 +176,35 @@ class MainActivity : ComponentActivity() {
                             }
                         }
 
+                        if (isServerRunning) {
+                            Card(Modifier.fillMaxWidth()) {
+                                Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    Text("CONNECTED DEVICES", style = MaterialTheme.typography.labelLarge)
+                                    Text(
+                                        if (connectedClients.isEmpty()) "No authenticated devices are active." else
+                                            "${connectedClients.size} device(s) currently connected.",
+                                        style = MaterialTheme.typography.bodyMedium
+                                    )
+                                    connectedClients.forEach { client ->
+                                        Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                            Text(client.ipAddress, style = MaterialTheme.typography.titleSmall)
+                                            Text(client.deviceInfo, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2)
+                                            Text(
+                                                "Connected ${formatTimestamp(client.connectedAt)} · Active ${formatTimestamp(client.lastSeen)}",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                            )
+                                        }
+                                    }
+                                    Text(
+                                        "Device details are based on its network address and browser information. Devices inactive for 30 seconds disappear from this list.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        }
+
                         Card(Modifier.fillMaxWidth()) {
                             Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
                                 Text("SHARED FILES", style = MaterialTheme.typography.labelLarge)
@@ -217,6 +255,38 @@ class MainActivity : ComponentActivity() {
                                 }
                                 if (receivedFiles.size > 10) {
                                     Text("Showing the 10 most recent uploads.", style = MaterialTheme.typography.bodySmall)
+                                }
+                            }
+                        }
+
+                        Card(Modifier.fillMaxWidth()) {
+                            Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                Text("TRANSFER HISTORY", style = MaterialTheme.typography.labelLarge)
+                                Text(
+                                    if (transferHistory.isEmpty()) "Completed transfers will appear here." else
+                                        "${transferHistory.size} recent transfer(s).",
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                                transferHistory.take(20).forEach { item ->
+                                    Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                        Text(item.name, style = MaterialTheme.typography.bodyMedium)
+                                        Text(
+                                            "${item.direction} · ${formatFileSize(item.size)}",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.primary
+                                        )
+                                        Text(
+                                            "${item.clientIp} · ${formatTimestamp(item.timestamp)}",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                        Text(
+                                            item.deviceInfo,
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                            maxLines = 2
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -325,6 +395,52 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private fun loadTransferHistory() {
+        val stored = getSharedPreferences("sharing_history", MODE_PRIVATE)
+            .getString("transfer_history", "[]") ?: "[]"
+        transferHistory = try {
+            val array = JSONArray(stored)
+            (0 until array.length()).mapNotNull { index ->
+                val item = array.optJSONObject(index) ?: return@mapNotNull null
+                TransferHistoryItem(
+                    name = item.optString("name", "Unknown file"),
+                    size = item.optLong("size", 0L),
+                    direction = item.optString("direction", "Transfer"),
+                    clientIp = item.optString("clientIp", "Unknown IP"),
+                    deviceInfo = item.optString("deviceInfo", "Unknown device"),
+                    timestamp = item.optLong("timestamp", 0L),
+                    success = item.optBoolean("success", true)
+                )
+            }
+        } catch (_: Exception) {
+            emptyList()
+        }
+    }
+
+    private fun addTransferHistory(item: TransferHistoryItem) {
+        transferHistory = (listOf(item) + transferHistory).take(100)
+        val array = JSONArray()
+        transferHistory.forEach { entry ->
+            array.put(
+                JSONObject()
+                    .put("name", entry.name)
+                    .put("size", entry.size)
+                    .put("direction", entry.direction)
+                    .put("clientIp", entry.clientIp)
+                    .put("deviceInfo", entry.deviceInfo)
+                    .put("timestamp", entry.timestamp)
+                    .put("success", entry.success)
+            )
+        }
+        getSharedPreferences("sharing_history", MODE_PRIVATE)
+            .edit().putString("transfer_history", array.toString()).apply()
+    }
+
+    private fun formatTimestamp(timestamp: Long): String {
+        if (timestamp <= 0L) return "Unknown time"
+        return SimpleDateFormat("dd MMM, HH:mm", Locale.getDefault()).format(Date(timestamp))
+    }
+
     private fun openReceivedFile(received: ReceivedFile) {
         try {
             val contentUri: Uri
@@ -408,9 +524,13 @@ class MainActivity : ComponentActivity() {
         statusMessage = "Starting secure server…"
         thread(name = "sharing-server-start") {
             try {
-                val newServer = LocalFileServer(this, { sharedFiles }, { received ->
-                    mainHandler.post { receivedFiles = receivedFiles + received }
-                }, accessPin)
+                val newServer = LocalFileServer(
+                    this,
+                    { sharedFiles },
+                    { received -> mainHandler.post { receivedFiles = receivedFiles + received } },
+                    accessPin,
+                    { item -> mainHandler.post { addTransferHistory(item) } }
+                )
                 newServer.start(SOCKET_TIMEOUT, false)
                 server = newServer
                 val addresses = getLocalIpv4Addresses()
