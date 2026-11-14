@@ -65,6 +65,8 @@ class LocalFileServer(
 
                 session.uri == "/api/status" -> if (isAuthorized(session)) serveTransferStatus() else unauthorized()
 
+                session.uri == "/api/upload-progress" -> if (isAuthorized(session)) recordUploadProgress(session) else unauthorized()
+
                 session.uri == "/upload" && session.method == Method.POST -> if (isAuthorized(session)) serveUpload(session) else unauthorized()
 
                 session.uri.startsWith("/download/") -> if (isAuthorized(session)) serveDownload(session.uri) else unauthorized()
@@ -135,6 +137,16 @@ class LocalFileServer(
             lastSpeedSample = now
         }
         return currentSpeeds
+    }
+
+
+    private fun recordUploadProgress(session: IHTTPSession): Response {
+        val delta = session.parameters["delta"]?.firstOrNull()?.toLongOrNull() ?: 0L
+        if (delta > 0L && delta <= 8L * 1024L * 1024L) {
+            uploadedBytes.addAndGet(delta)
+        }
+        return newFixedLengthResponse(Response.Status.NO_CONTENT, MIME_PLAINTEXT, "")
+            .apply { addHeader("Cache-Control", "no-store") }
     }
 
     private fun serveTransferStatus(): Response {
@@ -241,17 +253,7 @@ class LocalFileServer(
                 try {
                     val output = context.contentResolver.openOutputStream(contentUri)
                         ?: throw IllegalStateException("Unable to write uploaded file")
-                    output.use { stream ->
-                        val countingOutput = object : OutputStream() {
-                            override fun write(value: Int) { stream.write(value); uploadedBytes.incrementAndGet() }
-                            override fun write(buffer: ByteArray, offset: Int, length: Int) {
-                                stream.write(buffer, offset, length)
-                                uploadedBytes.addAndGet(length.toLong())
-                            }
-                            override fun flush() = stream.flush()
-                        }
-                        tempFile.inputStream().use { it.copyTo(countingOutput) }
-                    }
+                    output.use { stream -> tempFile.inputStream().use { it.copyTo(stream) } }
                     context.contentResolver.update(
                         contentUri,
                         ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) },
@@ -432,10 +434,20 @@ class LocalFileServer(
                     const xhr = new XMLHttpRequest();
                     xhr.open('POST', '/upload');
                     xhr.setRequestHeader('X-Auth-Token', authToken);
+                    let reportedBytes = 0;
                     xhr.upload.onprogress = event => {
                       if (event.lengthComputable) {
                         const overall = ((completed + event.loaded / event.total) / files.length) * 100;
                         progressBar.style.width = overall + '%';
+                      }
+                      const delta = event.loaded - reportedBytes;
+                      if (delta > 0) {
+                        reportedBytes = event.loaded;
+                        fetch('/api/upload-progress?delta=' + delta, {
+                          method: 'GET',
+                          headers: authHeaders(),
+                          cache: 'no-store'
+                        }).catch(() => {});
                       }
                     };
                     xhr.onload = () => xhr.status >= 200 && xhr.status < 300 ? resolve() : reject(new Error(xhr.responseText || 'Upload failed'));
