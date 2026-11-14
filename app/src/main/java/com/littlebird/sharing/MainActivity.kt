@@ -116,9 +116,10 @@ class MainActivity : ComponentActivity() {
                                     value = accessPin,
                                     onValueChange = { value -> accessPin = value.filter { it.isDigit() }.take(12) },
                                     modifier = Modifier.fillMaxWidth(),
+                                    enabled = !isServerRunning,
                                     label = { Text("Host PIN") },
                                     placeholder = { Text("Set a 4–12 digit PIN") },
-                                    supportingText = { Text("Connected devices must enter this PIN before accessing files.") },
+                                    supportingText = { Text(if (isServerRunning) "Stop the server before changing its PIN." else "Connected devices must enter this PIN before accessing files.") },
                                     singleLine = true
                                 )
                             }
