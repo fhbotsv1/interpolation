@@ -1,6 +1,9 @@
 package com.littlebird.sharing
 
 import android.graphics.Bitmap
+import android.content.Intent
+import android.net.Uri
+import androidx.core.content.FileProvider
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -41,6 +44,7 @@ import com.google.zxing.BarcodeFormat
 import com.google.zxing.qrcode.QRCodeWriter
 import java.net.Inet4Address
 import java.net.NetworkInterface
+import java.io.File
 import kotlin.concurrent.thread
 
 class MainActivity : ComponentActivity() {
@@ -55,6 +59,7 @@ class MainActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        loadReceivedFiles()
         setContent {
             val filePicker = rememberLauncherForActivityResult(
                 contract = ActivityResultContracts.OpenMultipleDocuments()
@@ -144,9 +149,17 @@ class MainActivity : ComponentActivity() {
                                     style = MaterialTheme.typography.bodyMedium
                                 )
                                 receivedFiles.takeLast(10).reversed().forEach { file ->
-                                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                                        Text(file.name, style = MaterialTheme.typography.bodyMedium)
-                                        Text(formatFileSize(file.size), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween
+                                    ) {
+                                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                            Text(file.name, style = MaterialTheme.typography.bodyMedium)
+                                            Text(formatFileSize(file.size), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        }
+                                        OutlinedButton(onClick = { openReceivedFile(file) }) {
+                                            Text("Open")
+                                        }
                                     }
                                 }
                                 if (receivedFiles.size > 10) {
@@ -212,6 +225,43 @@ class MainActivity : ComponentActivity() {
                     }
                 )
             }
+        }
+    }
+
+    private fun loadReceivedFiles() {
+        val directory = File(
+            getExternalFilesDir(android.os.Environment.DIRECTORY_DOWNLOADS) ?: filesDir,
+            "Received"
+        )
+        receivedFiles = directory.listFiles()
+            ?.filter { it.isFile }
+            ?.sortedBy { it.lastModified() }
+            ?.map { file -> ReceivedFile(file.name, file.length(), file.absolutePath) }
+            ?: emptyList()
+    }
+
+    private fun openReceivedFile(received: ReceivedFile) {
+        val file = File(received.path)
+        if (!file.exists()) {
+            statusMessage = "File not found: ${received.name}"
+            return
+        }
+        try {
+            val contentUri = FileProvider.getUriForFile(
+                this,
+                "${applicationContext.packageName}.provider",
+                file
+            )
+            val extension = file.extension.lowercase()
+            val mimeType = android.webkit.MimeTypeMap.getSingleton()
+                .getMimeTypeFromExtension(extension) ?: "*/*"
+            val intent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(contentUri, mimeType)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            startActivity(Intent.createChooser(intent, "Open file"))
+        } catch (error: Exception) {
+            statusMessage = "Unable to open file: ${error.localizedMessage ?: "No compatible app found"}"
         }
     }
 
