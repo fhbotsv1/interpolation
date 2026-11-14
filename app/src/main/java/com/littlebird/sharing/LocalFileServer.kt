@@ -375,8 +375,8 @@ class LocalFileServer(
             <div id="protected-content" hidden>
             <h2 class="section-title">Live transfer speed</h2>
             <section class="speed-panel">
-              <div class="speed"><small>Upload to this phone</small><strong id="upload-speed">0 B/s</strong></div>
-              <div class="speed"><small>Download from this phone</small><strong id="download-speed">0 B/s</strong></div>
+              <div class="speed"><small>Upload from this phone</small><strong id="upload-speed">0 B/s</strong></div>
+              <div class="speed"><small>Download to this phone</small><strong id="download-speed">0 B/s</strong></div>
             </section>
             <h2 class="section-title">Upload files to this phone</h2>
             <section class="upload-panel">
