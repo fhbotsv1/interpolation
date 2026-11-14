@@ -216,10 +216,22 @@ class LocalFileServer(
 
     private class CountingInputStream(
         input: InputStream,
+        private val expectedBytes: Long,
         private val onBytes: (Long) -> Unit,
         private val onComplete: () -> Unit
     ) : FilterInputStream(input) {
         private var completed = false
+        private var bytesRead = 0L
+
+        private fun record(count: Int) {
+            if (count > 0) {
+                bytesRead += count
+                onBytes(count.toLong())
+                if (expectedBytes >= 0L && bytesRead >= expectedBytes) completeOnce()
+            } else if (count < 0) {
+                completeOnce()
+            }
+        }
 
         private fun completeOnce() {
             if (!completed) {
@@ -230,13 +242,13 @@ class LocalFileServer(
 
         override fun read(): Int {
             val value = super.read()
-            if (value >= 0) onBytes(1) else completeOnce()
+            record(if (value >= 0) 1 else -1)
             return value
         }
 
         override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
             val count = super.read(buffer, offset, length)
-            if (count > 0) onBytes(count.toLong()) else if (count < 0) completeOnce()
+            record(count)
             return count
         }
     }
@@ -392,6 +404,7 @@ class LocalFileServer(
         val client = token?.let { connectedClients[it] }
         val input: InputStream = CountingInputStream(
             source,
+            file.size,
             { count -> downloadedBytes.addAndGet(count) },
             {
                 onTransferCompleted(
