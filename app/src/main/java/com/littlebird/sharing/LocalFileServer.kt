@@ -11,11 +11,15 @@ import fi.iki.elonen.NanoHTTPD
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.InputStream
+import java.io.FilterInputStream
+import java.io.OutputStream
 import java.io.File
 import java.net.URLEncoder
 import java.security.MessageDigest
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicLong
+import android.os.SystemClock
 
 data class SharedFile(
     val uri: Uri,
@@ -23,6 +27,8 @@ data class SharedFile(
     val size: Long,
     val mimeType: String
 )
+
+data class TransferSpeeds(val uploadBytesPerSecond: Long, val downloadBytesPerSecond: Long)
 
 data class ReceivedFile(
     val name: String,
@@ -40,6 +46,12 @@ class LocalFileServer(
 
     private val activeTokens = ConcurrentHashMap.newKeySet<String>()
     private val pinHash = sha256(accessPin)
+    private val uploadedBytes = AtomicLong(0)
+    private val downloadedBytes = AtomicLong(0)
+    private var lastSpeedSample = SystemClock.elapsedRealtime()
+    private var lastUploadedSample = 0L
+    private var lastDownloadedSample = 0L
+    @Volatile private var currentSpeeds = TransferSpeeds(0, 0)
 
     override fun serve(session: IHTTPSession): Response {
         return try {
@@ -50,6 +62,8 @@ class LocalFileServer(
                 session.uri == "/auth" && session.method == Method.POST -> serveAuth(session)
 
                 session.uri == "/api/files" -> if (isAuthorized(session)) serveFileList() else unauthorized()
+
+                session.uri == "/api/status" -> if (isAuthorized(session)) serveTransferStatus() else unauthorized()
 
                 session.uri == "/upload" && session.method == Method.POST -> if (isAuthorized(session)) serveUpload(session) else unauthorized()
 
@@ -103,6 +117,48 @@ class LocalFileServer(
 
     private fun sha256(value: String): ByteArray =
         MessageDigest.getInstance("SHA-256").digest(value.toByteArray(Charsets.UTF_8))
+
+
+    @Synchronized
+    fun getTransferSpeeds(): TransferSpeeds {
+        val now = SystemClock.elapsedRealtime()
+        val elapsed = now - lastSpeedSample
+        if (elapsed >= 900L) {
+            val uploaded = uploadedBytes.get()
+            val downloaded = downloadedBytes.get()
+            currentSpeeds = TransferSpeeds(
+                ((uploaded - lastUploadedSample) * 1000L / elapsed).coerceAtLeast(0),
+                ((downloaded - lastDownloadedSample) * 1000L / elapsed).coerceAtLeast(0)
+            )
+            lastUploadedSample = uploaded
+            lastDownloadedSample = downloaded
+            lastSpeedSample = now
+        }
+        return currentSpeeds
+    }
+
+    private fun serveTransferStatus(): Response {
+        val speeds = getTransferSpeeds()
+        val json = JSONObject()
+            .put("uploadBytesPerSecond", speeds.uploadBytesPerSecond)
+            .put("downloadBytesPerSecond", speeds.downloadBytesPerSecond)
+        return newFixedLengthResponse(Response.Status.OK, "application/json; charset=utf-8", json.toString())
+            .apply { addHeader("Cache-Control", "no-store") }
+    }
+
+    private class CountingInputStream(input: InputStream, private val onBytes: (Long) -> Unit) :
+        FilterInputStream(input) {
+        override fun read(): Int {
+            val value = super.read()
+            if (value >= 0) onBytes(1)
+            return value
+        }
+        override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
+            val count = super.read(buffer, offset, length)
+            if (count > 0) onBytes(count.toLong())
+            return count
+        }
+    }
 
     private fun serveFileList(): Response {
         val filesJson = JSONArray()
@@ -185,7 +241,17 @@ class LocalFileServer(
                 try {
                     val output = context.contentResolver.openOutputStream(contentUri)
                         ?: throw IllegalStateException("Unable to write uploaded file")
-                    output.use { stream -> tempFile.inputStream().use { it.copyTo(stream) } }
+                    output.use { stream ->
+                        val countingOutput = object : OutputStream() {
+                            override fun write(value: Int) { stream.write(value); uploadedBytes.incrementAndGet() }
+                            override fun write(buffer: ByteArray, offset: Int, length: Int) {
+                                stream.write(buffer, offset, length)
+                                uploadedBytes.addAndGet(length.toLong())
+                            }
+                            override fun flush() = stream.flush()
+                        }
+                        tempFile.inputStream().use { it.copyTo(countingOutput) }
+                    }
                     context.contentResolver.update(
                         contentUri,
                         ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) },
@@ -234,9 +300,10 @@ class LocalFileServer(
         val file = getSharedFiles().getOrNull(id)
             ?: return newFixedLengthResponse(Response.Status.NOT_FOUND, MIME_PLAINTEXT, "File not found")
 
-        val input: InputStream = context.contentResolver.openInputStream(file.uri)
+        val source: InputStream = context.contentResolver.openInputStream(file.uri)
             ?: return newFixedLengthResponse(Response.Status.NOT_FOUND, MIME_PLAINTEXT, "Unable to open file")
 
+        val input: InputStream = CountingInputStream(source) { count -> downloadedBytes.addAndGet(count) }
         val response = if (file.size >= 0L) {
             newFixedLengthResponse(
                 Response.Status.OK,
@@ -286,6 +353,10 @@ class LocalFileServer(
             #upload-status { margin-top: 10px; color: #526174; font-size: 13px; overflow-wrap: anywhere; }
             .progress { height: 8px; margin-top: 10px; border-radius: 8px; background: #e5eaf1; overflow: hidden; }
             #progress-bar { width: 0; height: 100%; background: #16804a; transition: width .15s; }
+            .speed-panel { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:14px; }
+            .speed { padding:13px; border-radius:12px; background:#fff; border:1px solid #e1e6ee; }
+            .speed strong { display:block; font-size:18px; margin-top:4px; }
+            .speed small { color:#687588; }
             footer { margin-top: 18px; color: #758195; font-size: 12px; text-align: center; }
           </style>
         </head>
@@ -302,6 +373,11 @@ class LocalFileServer(
               <div id="pin-status" role="status"></div>
             </section>
             <div id="protected-content" hidden>
+            <h2 class="section-title">Live transfer speed</h2>
+            <section class="speed-panel">
+              <div class="speed"><small>Upload to this phone</small><strong id="upload-speed">0 B/s</strong></div>
+              <div class="speed"><small>Download from this phone</small><strong id="download-speed">0 B/s</strong></div>
+            </section>
             <h2 class="section-title">Upload files to this phone</h2>
             <section class="upload-panel">
               <input id="upload-input" type="file" multiple>
@@ -385,6 +461,21 @@ class LocalFileServer(
               while (value >= 1024 && unit < units.length - 1) { value /= 1024; unit++; }
               return value.toFixed(unit === 0 ? 0 : 1) + ' ' + units[unit];
             }
+            function formatRate(bytes) {
+              if (bytes < 1024) return bytes + ' B/s';
+              if (bytes < 1024*1024) return (bytes/1024).toFixed(1) + ' KB/s';
+              return (bytes/(1024*1024)).toFixed(2) + ' MB/s';
+            }
+            async function refreshSpeed() {
+              if (!authToken) return;
+              try {
+                const response = await fetch('/api/status', {cache:'no-store', headers:authHeaders()});
+                if (!response.ok) return;
+                const data = await response.json();
+                document.getElementById('upload-speed').textContent = formatRate(data.uploadBytesPerSecond);
+                document.getElementById('download-speed').textContent = formatRate(data.downloadBytesPerSecond);
+              } catch (_) {}
+            }
             async function refreshFiles() {
               try {
                 const response = await fetch('/api/files', {cache:'no-store', headers:authHeaders()});
@@ -426,8 +517,8 @@ class LocalFileServer(
                 list.appendChild(empty);
               }
             }
-            if (authToken) refreshFiles();
-            setInterval(() => { if (authToken) refreshFiles(); }, 5000);
+            if (authToken) { refreshFiles(); refreshSpeed(); }
+            setInterval(() => { if (authToken) { refreshFiles(); refreshSpeed(); } }, 1000);
           </script>
         </body>
         </html>
