@@ -90,8 +90,7 @@ class LocalFileServer(
             newChunkedResponse(
                 Response.Status.OK,
                 file.mimeType.ifBlank { "application/octet-stream" },
-                input,
-                16 * 1024
+                input
             )
         }
         val encodedName = URLEncoder.encode(file.name, "UTF-8").replace("+", "%20")
