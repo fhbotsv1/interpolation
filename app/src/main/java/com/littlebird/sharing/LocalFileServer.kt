@@ -202,7 +202,14 @@ class LocalFileServer(
             .file-name { min-width: 0; overflow-wrap: anywhere; font-weight: 600; }
             .file-size { margin-top: 4px; color: #687588; font-size: 13px; }
             a.download { flex: 0 0 auto; padding: 10px 14px; border-radius: 10px; background: #2563eb; color: white; text-decoration: none; font-weight: 600; }
-            #empty { padding: 24px; text-align: center; color: #687588; background: white; border: 1px dashed #c8d1df; border-radius: 14px; }\n            .upload-panel { padding: 18px; background: white; border: 1px solid #e1e6ee; border-radius: 14px; }\n            input[type=file] { width: 100%; margin: 8px 0 12px; }\n            button.upload { width: 100%; padding: 12px 16px; border: 0; border-radius: 10px; background: #16804a; color: white; font-weight: 700; font-size: 15px; }\n            button.upload:disabled { opacity: .55; }\n            #upload-status { margin-top: 10px; color: #526174; font-size: 13px; overflow-wrap: anywhere; }\n            .progress { height: 8px; margin-top: 10px; border-radius: 8px; background: #e5eaf1; overflow: hidden; }\n            #progress-bar { width: 0; height: 100%; background: #16804a; transition: width .15s; }
+            #empty { padding: 24px; text-align: center; color: #687588; background: white; border: 1px dashed #c8d1df; border-radius: 14px; }
+            .upload-panel { padding: 18px; background: white; border: 1px solid #e1e6ee; border-radius: 14px; }
+            input[type=file] { width: 100%; margin: 8px 0 12px; }
+            button.upload { width: 100%; padding: 12px 16px; border: 0; border-radius: 10px; background: #16804a; color: white; font-weight: 700; font-size: 15px; }
+            button.upload:disabled { opacity: .55; }
+            #upload-status { margin-top: 10px; color: #526174; font-size: 13px; overflow-wrap: anywhere; }
+            .progress { height: 8px; margin-top: 10px; border-radius: 8px; background: #e5eaf1; overflow: hidden; }
+            #progress-bar { width: 0; height: 100%; background: #16804a; transition: width .15s; }
             footer { margin-top: 18px; color: #758195; font-size: 12px; text-align: center; }
           </style>
         </head>
@@ -212,12 +219,58 @@ class LocalFileServer(
               <h1>Little Bird Sharing</h1>
               <p>Files shared from the host device</p>
             </header>
-            <h2 class="section-title">Upload files to this phone</h2>\n            <section class="upload-panel">\n              <input id="upload-input" type="file" multiple>\n              <button class="upload" id="upload-button" type="button">Upload selected files</button>\n              <div class="progress"><div id="progress-bar"></div></div>\n              <div id="upload-status" role="status">Choose one or more files to send to the host.</div>\n            </section>\n            <h2 class="section-title">Available files</h2>
+            <h2 class="section-title">Upload files to this phone</h2>
+            <section class="upload-panel">
+              <input id="upload-input" type="file" multiple>
+              <button class="upload" id="upload-button" type="button">Upload selected files</button>
+              <div class="progress"><div id="progress-bar"></div></div>
+              <div id="upload-status" role="status">Choose one or more files to send to the host.</div>
+            </section>
+            <h2 class="section-title">Available files</h2>
             <section id="file-list"><div id="empty">Loading files…</div></section>
             <footer>File list refreshes automatically every 5 seconds.</footer>
           </main>
           <script>
-            const list = document.getElementById('file-list');\n            const uploadInput = document.getElementById('upload-input');\n            const uploadButton = document.getElementById('upload-button');\n            const uploadStatus = document.getElementById('upload-status');\n            const progressBar = document.getElementById('progress-bar');\n            uploadButton.addEventListener('click', async () => {\n              const files = Array.from(uploadInput.files || []);\n              if (!files.length) { uploadStatus.textContent = 'Select at least one file first.'; return; }\n              uploadButton.disabled = true;\n              let completed = 0;\n              for (const file of files) {\n                uploadStatus.textContent = 'Uploading ' + file.name + ' (' + (completed + 1) + '/' + files.length + ')…';\n                try {\n                  await new Promise((resolve, reject) => {\n                    const form = new FormData();\n                    form.append('file', file, file.name);\n                    const xhr = new XMLHttpRequest();\n                    xhr.open('POST', '/upload');\n                    xhr.upload.onprogress = event => {\n                      if (event.lengthComputable) {\n                        const overall = ((completed + event.loaded / event.total) / files.length) * 100;\n                        progressBar.style.width = overall + '%';\n                      }\n                    };\n                    xhr.onload = () => xhr.status >= 200 && xhr.status < 300 ? resolve() : reject(new Error(xhr.responseText || 'Upload failed'));\n                    xhr.onerror = () => reject(new Error('Network error during upload'));\n                    xhr.send(form);\n                  });\n                  completed++;\n                  progressBar.style.width = (completed / files.length * 100) + '%';\n                } catch (error) {\n                  uploadStatus.textContent = 'Failed: ' + file.name + '. ' + error.message;\n                  uploadButton.disabled = false;\n                  return;\n                }\n              }\n              uploadStatus.textContent = completed + ' file(s) uploaded successfully.';\n              uploadInput.value = '';\n              uploadButton.disabled = false;\n            });
+            const list = document.getElementById('file-list');
+            const uploadInput = document.getElementById('upload-input');
+            const uploadButton = document.getElementById('upload-button');
+            const uploadStatus = document.getElementById('upload-status');
+            const progressBar = document.getElementById('progress-bar');
+            uploadButton.addEventListener('click', async () => {
+              const files = Array.from(uploadInput.files || []);
+              if (!files.length) { uploadStatus.textContent = 'Select at least one file first.'; return; }
+              uploadButton.disabled = true;
+              let completed = 0;
+              for (const file of files) {
+                uploadStatus.textContent = 'Uploading ' + file.name + ' (' + (completed + 1) + '/' + files.length + ')…';
+                try {
+                  await new Promise((resolve, reject) => {
+                    const form = new FormData();
+                    form.append('file', file, file.name);
+                    const xhr = new XMLHttpRequest();
+                    xhr.open('POST', '/upload');
+                    xhr.upload.onprogress = event => {
+                      if (event.lengthComputable) {
+                        const overall = ((completed + event.loaded / event.total) / files.length) * 100;
+                        progressBar.style.width = overall + '%';
+                      }
+                    };
+                    xhr.onload = () => xhr.status >= 200 && xhr.status < 300 ? resolve() : reject(new Error(xhr.responseText || 'Upload failed'));
+                    xhr.onerror = () => reject(new Error('Network error during upload'));
+                    xhr.send(form);
+                  });
+                  completed++;
+                  progressBar.style.width = (completed / files.length * 100) + '%';
+                } catch (error) {
+                  uploadStatus.textContent = 'Failed: ' + file.name + '. ' + error.message;
+                  uploadButton.disabled = false;
+                  return;
+                }
+              }
+              uploadStatus.textContent = completed + ' file(s) uploaded successfully.';
+              uploadInput.value = '';
+              uploadButton.disabled = false;
+            });
             function formatSize(bytes) {
               if (!bytes || bytes < 0) return 'Size unavailable';
               const units = ['B', 'KB', 'MB', 'GB', 'TB'];
@@ -273,6 +326,7 @@ class LocalFileServer(
     """.trimIndent()
 
     companion object {
-        const val DEFAULT_PORT = 8080\n        private const val MAX_UPLOAD_BYTES = 500L * 1024L * 1024L
+        const val DEFAULT_PORT = 8080
+        private const val MAX_UPLOAD_BYTES = 500L * 1024L * 1024L
     }
 }
