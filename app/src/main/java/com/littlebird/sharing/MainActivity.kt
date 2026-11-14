@@ -382,20 +382,19 @@ class MainActivity : ComponentActivity() {
             if (showClearReceivedDialog) {
                 AlertDialog(
                     onDismissRequest = { showClearReceivedDialog = false },
-                    title = { Text("Delete received files?") },
-                    text = { Text("This permanently deletes files saved in Downloads/Little Bird Sharing. Files opened or copied elsewhere are not affected.") },
+                    title = { Text("Clear received files list?") },
+                    text = { Text("This only removes the files from the list in this app. The actual files will remain in Downloads/Little Bird Sharing and can still be opened from your file manager.") },
                     confirmButton = {
                         TextButton(onClick = {
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                                receivedFiles.forEach { file ->
-                                    runCatching { contentResolver.delete(Uri.parse(file.path), null, null) }
-                                }
-                            } else {
-                                receivedFiles.forEach { file -> runCatching { File(file.path).delete() } }
-                            }
-                            loadReceivedFiles()
+                            val hiddenPaths = getSharedPreferences("sharing_received", MODE_PRIVATE)
+                                .getStringSet("hidden_received_paths", emptySet())
+                                .orEmpty().toMutableSet()
+                            hiddenPaths.addAll(receivedFiles.map { it.path })
+                            getSharedPreferences("sharing_received", MODE_PRIVATE)
+                                .edit().putStringSet("hidden_received_paths", hiddenPaths).apply()
+                            receivedFiles = emptyList()
                             showClearReceivedDialog = false
-                        }) { Text("Delete files") }
+                        }) { Text("Clear list") }
                     },
                     dismissButton = { TextButton(onClick = { showClearReceivedDialog = false }) { Text("Cancel") } }
                 )
@@ -427,7 +426,7 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun loadReceivedFiles() {
-        receivedFiles = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+        val allFiles = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val files = mutableListOf<ReceivedFile>()
             val collection = MediaStore.Downloads.EXTERNAL_CONTENT_URI
             val projection = arrayOf(
@@ -468,6 +467,11 @@ class MainActivity : ComponentActivity() {
                 ?.map { file -> ReceivedFile(file.name, file.length(), file.absolutePath) }
                 ?: emptyList()
         }
+
+        val hiddenPaths = getSharedPreferences("sharing_received", MODE_PRIVATE)
+            .getStringSet("hidden_received_paths", emptySet())
+            .orEmpty()
+        receivedFiles = allFiles.filterNot { it.path in hiddenPaths }
     }
 
     private fun loadTransferHistory() {
