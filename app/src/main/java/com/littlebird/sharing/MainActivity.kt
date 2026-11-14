@@ -61,6 +61,18 @@ class MainActivity : ComponentActivity() {
     private var sharedFiles by mutableStateOf<List<SharedFile>>(emptyList())
     private var receivedFiles by mutableStateOf<List<ReceivedFile>>(emptyList())
     private var accessPin by mutableStateOf("")
+    private var uploadSpeed by mutableStateOf("0 B/s")
+    private var downloadSpeed by mutableStateOf("0 B/s")
+
+    private val speedUpdater = object : Runnable {
+        override fun run() {
+            server?.getTransferSpeeds()?.let { speeds ->
+                uploadSpeed = formatTransferRate(speeds.uploadBytesPerSecond)
+                downloadSpeed = formatTransferRate(speeds.downloadBytesPerSecond)
+            }
+            if (isServerRunning) mainHandler.postDelayed(this, 1000)
+        }
+    }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -125,6 +137,23 @@ class MainActivity : ComponentActivity() {
                                     color = if (isServerRunning) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
                                 )
                                 Text(statusMessage)
+                            }
+                        }
+
+
+                        Card(Modifier.fillMaxWidth()) {
+                            Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text("LIVE TRANSFER SPEED", style = MaterialTheme.typography.labelLarge)
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                                    Column(Modifier.weight(1f)) {
+                                        Text("Upload to phone", style = MaterialTheme.typography.bodySmall)
+                                        Text(uploadSpeed, style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary)
+                                    }
+                                    Column(Modifier.weight(1f)) {
+                                        Text("Download from phone", style = MaterialTheme.typography.bodySmall)
+                                        Text(downloadSpeed, style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary)
+                                    }
+                                }
                             }
                         }
 
@@ -341,6 +370,12 @@ class MainActivity : ComponentActivity() {
         return SharedFile(uri, name, size, mimeType)
     }
 
+    private fun formatTransferRate(bytes: Long): String {
+        if (bytes < 1024) return "$bytes B/s"
+        if (bytes < 1024 * 1024) return String.format("%.1f KB/s", bytes / 1024.0)
+        return String.format("%.2f MB/s", bytes / (1024.0 * 1024.0))
+    }
+
     private fun formatFileSize(size: Long): String {
         if (size < 0) return "Size unavailable"
         if (size < 1024) return "$size B"
@@ -381,6 +416,8 @@ class MainActivity : ComponentActivity() {
                 mainHandler.post {
                     hostAddresses = addresses
                     isServerRunning = true
+                    mainHandler.removeCallbacks(speedUpdater)
+                    mainHandler.post(speedUpdater)
                     statusMessage = "PIN-protected server listening on port " + LocalFileServer.DEFAULT_PORT
                 }
             } catch (error: Exception) {
@@ -398,6 +435,9 @@ class MainActivity : ComponentActivity() {
             server = null
             mainHandler.post {
                 isServerRunning = false
+                mainHandler.removeCallbacks(speedUpdater)
+                uploadSpeed = "0 B/s"
+                downloadSpeed = "0 B/s"
                 hostAddresses = emptyList()
                 statusMessage = "Server is stopped"
             }
@@ -422,6 +462,7 @@ class MainActivity : ComponentActivity() {
     }
 
     override fun onDestroy() {
+        mainHandler.removeCallbacks(speedUpdater)
         server?.stop()
         server = null
         super.onDestroy()
