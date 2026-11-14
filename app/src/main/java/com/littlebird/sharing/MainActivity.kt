@@ -1,10 +1,12 @@
 package com.littlebird.sharing
 
+import android.graphics.Bitmap
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -15,6 +17,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
@@ -22,11 +25,17 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.dp
+import com.google.zxing.BarcodeFormat
+import com.google.zxing.qrcode.QRCodeWriter
 import java.net.Inet4Address
 import java.net.NetworkInterface
 import kotlin.concurrent.thread
@@ -37,6 +46,7 @@ class MainActivity : ComponentActivity() {
     private var isServerRunning by mutableStateOf(false)
     private var statusMessage by mutableStateOf("Server is stopped")
     private var hostAddresses by mutableStateOf(emptyList<String>())
+    private var selectedQrAddress by mutableStateOf<String?>(null)
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -79,7 +89,11 @@ class MainActivity : ComponentActivity() {
                                         Text("No local IPv4 address found. Check the Wi-Fi connection.")
                                     } else {
                                         hostAddresses.forEach { address ->
-                                            Text("http://" + address + ":" + LocalFileServer.DEFAULT_PORT, style = MaterialTheme.typography.titleMedium)
+                                            val url = "http://" + address + ":" + LocalFileServer.DEFAULT_PORT
+                                            Text(url, style = MaterialTheme.typography.titleMedium)
+                                            OutlinedButton(onClick = { selectedQrAddress = url }) {
+                                                Text("Show QR code")
+                                            }
                                         }
                                     }
                                     Text("Connect both devices to the same Wi-Fi network.", style = MaterialTheme.typography.bodySmall)
@@ -96,6 +110,40 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+
+        selectedQrAddress?.let { url ->
+            val qrBitmap = remember(url) { createQrBitmap(url) }
+            AlertDialog(
+                onDismissRequest = { selectedQrAddress = null },
+                title = { Text("Scan to connect") },
+                text = {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Text("Scan this QR code with the other device's camera.")
+                        Image(
+                            bitmap = qrBitmap.asImageBitmap(),
+                            contentDescription = "QR code for " + url,
+                            modifier = Modifier.fillMaxWidth().height(260.dp),
+                            contentScale = ContentScale.Fit
+                        )
+                        Text(url, style = MaterialTheme.typography.bodySmall)
+                    }
+                },
+                confirmButton = {
+                    TextButton(onClick = { selectedQrAddress = null }) { Text("Close") }
+                }
+            )
+        }
+    }
+
+    private fun createQrBitmap(content: String): Bitmap {
+        val matrix = QRCodeWriter().encode(content, BarcodeFormat.QR_CODE, 640, 640)
+        val bitmap = Bitmap.createBitmap(640, 640, Bitmap.Config.ARGB_8888)
+        for (x in 0 until 640) {
+            for (y in 0 until 640) {
+                bitmap.setPixel(x, y, if (matrix[x, y]) android.graphics.Color.BLACK else android.graphics.Color.WHITE)
+            }
+        }
+        return bitmap
     }
 
     private fun startServer() {
