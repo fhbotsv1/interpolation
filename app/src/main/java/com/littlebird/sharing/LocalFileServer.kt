@@ -31,6 +31,7 @@ data class SharedFile(
 data class TransferSpeeds(val uploadBytesPerSecond: Long, val downloadBytesPerSecond: Long)
 
 data class ConnectedClient(
+    val token: String,
     val ipAddress: String,
     val deviceInfo: String,
     val connectedAt: Long,
@@ -121,6 +122,7 @@ class LocalFileServer(
             val token = UUID.randomUUID().toString()
             activeTokens.add(token)
             connectedClients[token] = ConnectedClient(
+                token,
                 session.remoteIpAddress ?: "Unknown IP",
                 session.headers["user-agent"] ?: "Unknown device/browser",
                 System.currentTimeMillis(),
@@ -144,11 +146,25 @@ class LocalFileServer(
         return true
     }
 
+    fun disconnectClient(token: String) {
+        activeTokens.remove(token)
+        connectedClients.remove(token)
+    }
+
+    fun disconnectAllClients() {
+        activeTokens.clear()
+        connectedClients.clear()
+    }
+
     fun getConnectedClients(): List<ConnectedClient> {
         val cutoff = System.currentTimeMillis() - CLIENT_ACTIVE_WINDOW_MS
-        return connectedClients.values
-            .filter { it.lastSeen >= cutoff }
-            .sortedByDescending { it.lastSeen }
+        connectedClients.entries
+            .filter { it.value.lastSeen < cutoff }
+            .forEach { entry ->
+                activeTokens.remove(entry.key)
+                connectedClients.remove(entry.key)
+            }
+        return connectedClients.values.sortedByDescending { it.lastSeen }
     }
 
     private fun serveConnectedClients(): Response {
