@@ -106,33 +106,35 @@ class MainActivity : ComponentActivity() {
                             "This milestone verifies that another device can reach the phone. File browsing, downloads, uploads, QR connection and hotspot mode will be added step by step.",
                             style = MaterialTheme.typography.bodyMedium
                         )
+
+            selectedQrAddress?.let { url ->
+                val qrBitmap = remember(url) { createQrBitmap(url) }
+                AlertDialog(
+                    onDismissRequest = { selectedQrAddress = null },
+                    title = { Text("Scan to connect") },
+                    text = {
+                        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                            Text("Scan this QR code with the other device's camera.")
+                            Image(
+                                bitmap = qrBitmap.asImageBitmap(),
+                                contentDescription = "QR code for " + url,
+                                modifier = Modifier.fillMaxWidth().height(260.dp),
+                                contentScale = ContentScale.Fit
+                            )
+                            Text(url, style = MaterialTheme.typography.bodySmall)
+                        }
+                    },
+                    confirmButton = {
+                        TextButton(onClick = { selectedQrAddress = null }) { Text("Close") }
+                    }
+                )
+            }
                     }
                 }
             }
         }
 
-        selectedQrAddress?.let { url ->
-            val qrBitmap = remember(url) { createQrBitmap(url) }
-            AlertDialog(
-                onDismissRequest = { selectedQrAddress = null },
-                title = { Text("Scan to connect") },
-                text = {
-                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                        Text("Scan this QR code with the other device's camera.")
-                        Image(
-                            bitmap = qrBitmap.asImageBitmap(),
-                            contentDescription = "QR code for " + url,
-                            modifier = Modifier.fillMaxWidth().height(260.dp),
-                            contentScale = ContentScale.Fit
-                        )
-                        Text(url, style = MaterialTheme.typography.bodySmall)
-                    }
-                },
-                confirmButton = {
-                    TextButton(onClick = { selectedQrAddress = null }) { Text("Close") }
-                }
-            )
-        }
+
     }
 
     private fun createQrBitmap(content: String): Bitmap {
