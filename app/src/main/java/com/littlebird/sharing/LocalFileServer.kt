@@ -30,6 +30,23 @@ data class SharedFile(
 
 data class TransferSpeeds(val uploadBytesPerSecond: Long, val downloadBytesPerSecond: Long)
 
+data class ConnectedClient(
+    val ipAddress: String,
+    val deviceInfo: String,
+    val connectedAt: Long,
+    val lastSeen: Long
+)
+
+data class TransferHistoryItem(
+    val name: String,
+    val size: Long,
+    val direction: String,
+    val clientIp: String,
+    val deviceInfo: String,
+    val timestamp: Long,
+    val success: Boolean
+)
+
 data class ReceivedFile(
     val name: String,
     val size: Long,
@@ -41,10 +58,12 @@ class LocalFileServer(
     private val getSharedFiles: () -> List<SharedFile>,
     private val onFileReceived: (ReceivedFile) -> Unit = {},
     private val accessPin: String,
+    private val onTransferCompleted: (TransferHistoryItem) -> Unit = {},
     port: Int = DEFAULT_PORT
 ) : NanoHTTPD("0.0.0.0", port) {
 
     private val activeTokens = ConcurrentHashMap.newKeySet<String>()
+    private val connectedClients = ConcurrentHashMap<String, ConnectedClient>()
     private val pinHash = sha256(accessPin)
     private val uploadedBytes = AtomicLong(0)
     private val downloadedBytes = AtomicLong(0)
@@ -65,11 +84,13 @@ class LocalFileServer(
 
                 session.uri == "/api/status" -> if (isAuthorized(session)) serveTransferStatus() else unauthorized()
 
+                session.uri == "/api/clients" -> if (isAuthorized(session)) serveConnectedClients() else unauthorized()
+
                 session.uri == "/api/upload-progress" -> if (isAuthorized(session)) recordUploadProgress(session) else unauthorized()
 
                 session.uri == "/upload" && session.method == Method.POST -> if (isAuthorized(session)) serveUpload(session) else unauthorized()
 
-                session.uri.startsWith("/download/") -> if (isAuthorized(session)) serveDownload(session.uri) else unauthorized()
+                session.uri.startsWith("/download/") -> if (isAuthorized(session)) serveDownload(session) else unauthorized()
 
                 else -> newFixedLengthResponse(
                     Response.Status.OK,
@@ -99,6 +120,12 @@ class LocalFileServer(
             }
             val token = UUID.randomUUID().toString()
             activeTokens.add(token)
+            connectedClients[token] = ConnectedClient(
+                session.remoteIpAddress ?: "Unknown IP",
+                session.headers["user-agent"] ?: "Unknown device/browser",
+                System.currentTimeMillis(),
+                System.currentTimeMillis()
+            )
             newFixedLengthResponse(Response.Status.OK, "application/json; charset=utf-8",
                 JSONObject().put("token", token).toString()).apply {
                 addHeader("Cache-Control", "no-store")
@@ -110,7 +137,36 @@ class LocalFileServer(
 
     private fun isAuthorized(session: IHTTPSession): Boolean {
         val token = session.headers["x-auth-token"] ?: session.parameters["token"]?.firstOrNull()
-        return activeTokens.contains(token)
+        if (token == null || !activeTokens.contains(token)) return false
+        connectedClients.computeIfPresent(token) { _, client ->
+            client.copy(lastSeen = System.currentTimeMillis())
+        }
+        return true
+    }
+
+    fun getConnectedClients(): List<ConnectedClient> {
+        val cutoff = System.currentTimeMillis() - CLIENT_ACTIVE_WINDOW_MS
+        return connectedClients.values
+            .filter { it.lastSeen >= cutoff }
+            .sortedByDescending { it.lastSeen }
+    }
+
+    private fun serveConnectedClients(): Response {
+        val clients = JSONArray()
+        getConnectedClients().forEach { client ->
+            clients.put(
+                JSONObject()
+                    .put("ipAddress", client.ipAddress)
+                    .put("deviceInfo", client.deviceInfo)
+                    .put("connectedAt", client.connectedAt)
+                    .put("lastSeen", client.lastSeen)
+            )
+        }
+        return newFixedLengthResponse(
+            Response.Status.OK,
+            "application/json; charset=utf-8",
+            JSONObject().put("clients", clients).toString()
+        ).apply { addHeader("Cache-Control", "no-store") }
     }
 
     private fun unauthorized(): Response = newFixedLengthResponse(
@@ -158,16 +214,29 @@ class LocalFileServer(
             .apply { addHeader("Cache-Control", "no-store") }
     }
 
-    private class CountingInputStream(input: InputStream, private val onBytes: (Long) -> Unit) :
-        FilterInputStream(input) {
+    private class CountingInputStream(
+        input: InputStream,
+        private val onBytes: (Long) -> Unit,
+        private val onComplete: () -> Unit
+    ) : FilterInputStream(input) {
+        private var completed = false
+
+        private fun completeOnce() {
+            if (!completed) {
+                completed = true
+                onComplete()
+            }
+        }
+
         override fun read(): Int {
             val value = super.read()
-            if (value >= 0) onBytes(1)
+            if (value >= 0) onBytes(1) else completeOnce()
             return value
         }
+
         override fun read(buffer: ByteArray, offset: Int, length: Int): Int {
             val count = super.read(buffer, offset, length)
-            if (count > 0) onBytes(count.toLong())
+            if (count > 0) onBytes(count.toLong()) else if (count < 0) completeOnce()
             return count
         }
     }
@@ -279,6 +348,19 @@ class LocalFileServer(
             }
             tempFile.delete()
             onFileReceived(received)
+            val token = session.headers["x-auth-token"] ?: session.parameters["token"]?.firstOrNull()
+            val client = token?.let { connectedClients[it] }
+            onTransferCompleted(
+                TransferHistoryItem(
+                    received.name,
+                    received.size,
+                    "Upload to host",
+                    client?.ipAddress ?: session.remoteIpAddress.orEmpty(),
+                    client?.deviceInfo ?: session.headers["user-agent"].orEmpty(),
+                    System.currentTimeMillis(),
+                    true
+                )
+            )
 
             val result = JSONObject()
                 .put("success", true)
@@ -295,7 +377,8 @@ class LocalFileServer(
         }
     }
 
-    private fun serveDownload(path: String): Response {
+    private fun serveDownload(session: IHTTPSession): Response {
+        val path = session.uri
         val id = path.removePrefix("/download/").toIntOrNull()
             ?: return newFixedLengthResponse(Response.Status.BAD_REQUEST, MIME_PLAINTEXT, "Invalid file ID")
 
@@ -305,7 +388,25 @@ class LocalFileServer(
         val source: InputStream = context.contentResolver.openInputStream(file.uri)
             ?: return newFixedLengthResponse(Response.Status.NOT_FOUND, MIME_PLAINTEXT, "Unable to open file")
 
-        val input: InputStream = CountingInputStream(source) { count -> downloadedBytes.addAndGet(count) }
+        val token = session.headers["x-auth-token"] ?: session.parameters["token"]?.firstOrNull()
+        val client = token?.let { connectedClients[it] }
+        val input: InputStream = CountingInputStream(
+            source,
+            { count -> downloadedBytes.addAndGet(count) },
+            {
+                onTransferCompleted(
+                    TransferHistoryItem(
+                        file.name,
+                        file.size,
+                        "Download to client",
+                        client?.ipAddress ?: session.remoteIpAddress.orEmpty(),
+                        client?.deviceInfo ?: session.headers["user-agent"].orEmpty(),
+                        System.currentTimeMillis(),
+                        true
+                    )
+                )
+            }
+        )
         val response = if (file.size >= 0L) {
             newFixedLengthResponse(
                 Response.Status.OK,
@@ -539,5 +640,6 @@ class LocalFileServer(
     companion object {
         const val DEFAULT_PORT = 8080
         private const val MAX_UPLOAD_BYTES = 500L * 1024L * 1024L
+        private const val CLIENT_ACTIVE_WINDOW_MS = 30_000L
     }
 }
