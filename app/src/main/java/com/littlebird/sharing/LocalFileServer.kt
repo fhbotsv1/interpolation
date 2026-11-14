@@ -1,6 +1,9 @@
 package com.littlebird.sharing
 
 import android.content.Context
+import android.content.ContentValues
+import android.os.Build
+import android.provider.MediaStore
 import android.net.Uri
 import android.provider.OpenableColumns
 import android.os.Environment
@@ -9,7 +12,6 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.InputStream
 import java.io.File
-import java.util.UUID
 import java.net.URLEncoder
 
 data class SharedFile(
@@ -120,20 +122,53 @@ class LocalFileServer(
                 .take(120)
                 .ifBlank { "uploaded_file" }
 
-            val receivedDirectory = File(
-                context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: context.filesDir,
-                "Received"
-            )
-            if (!receivedDirectory.exists() && !receivedDirectory.mkdirs()) {
-                tempFile.delete()
-                return newFixedLengthResponse(Response.Status.INTERNAL_ERROR, MIME_PLAINTEXT, "Cannot create received files folder")
+            val mimeType = android.webkit.MimeTypeMap.getSingleton()
+                .getMimeTypeFromExtension(safeName.substringAfterLast('.', "").lowercase())
+                ?: "application/octet-stream"
+
+            val received = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                val values = ContentValues().apply {
+                    put(MediaStore.Downloads.DISPLAY_NAME, safeName)
+                    put(MediaStore.Downloads.MIME_TYPE, mimeType)
+                    put(
+                        MediaStore.Downloads.RELATIVE_PATH,
+                        Environment.DIRECTORY_DOWNLOADS + "/Little Bird Sharing"
+                    )
+                    put(MediaStore.Downloads.IS_PENDING, 1)
+                }
+                val contentUri = context.contentResolver.insert(
+                    MediaStore.Downloads.EXTERNAL_CONTENT_URI,
+                    values
+                ) ?: throw IllegalStateException("Unable to create file in public Downloads")
+
+                try {
+                    val output = context.contentResolver.openOutputStream(contentUri)
+                        ?: throw IllegalStateException("Unable to write uploaded file")
+                    output.use { stream -> tempFile.inputStream().use { it.copyTo(stream) } }
+                    context.contentResolver.update(
+                        contentUri,
+                        ContentValues().apply { put(MediaStore.Downloads.IS_PENDING, 0) },
+                        null,
+                        null
+                    )
+                    ReceivedFile(safeName, tempFile.length(), contentUri.toString())
+                } catch (error: Exception) {
+                    context.contentResolver.delete(contentUri, null, null)
+                    throw error
+                }
+            } else {
+                val receivedDirectory = File(
+                    context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS) ?: context.filesDir,
+                    "Received"
+                )
+                if (!receivedDirectory.exists() && !receivedDirectory.mkdirs()) {
+                    throw IllegalStateException("Cannot create received files folder")
+                }
+                val destination = File(receivedDirectory, "${System.currentTimeMillis()}_$safeName")
+                tempFile.copyTo(destination, overwrite = false)
+                ReceivedFile(destination.name, destination.length(), destination.absolutePath)
             }
-
-            val destination = File(receivedDirectory, "${System.currentTimeMillis()}_${UUID.randomUUID().toString().take(8)}_$safeName")
-            tempFile.copyTo(destination, overwrite = false)
             tempFile.delete()
-
-            val received = ReceivedFile(destination.name, destination.length(), destination.absolutePath)
             onFileReceived(received)
 
             val result = JSONObject()
