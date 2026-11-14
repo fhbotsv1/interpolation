@@ -79,12 +79,21 @@ class LocalFileServer(
         val input: InputStream = context.contentResolver.openInputStream(file.uri)
             ?: return newFixedLengthResponse(Response.Status.NOT_FOUND, MIME_PLAINTEXT, "Unable to open file")
 
-        val response = newFixedLengthResponse(
-            Response.Status.OK,
-            file.mimeType.ifBlank { "application/octet-stream" },
-            input,
-            file.size
-        )
+        val response = if (file.size >= 0L) {
+            newFixedLengthResponse(
+                Response.Status.OK,
+                file.mimeType.ifBlank { "application/octet-stream" },
+                input,
+                file.size
+            )
+        } else {
+            newChunkedResponse(
+                Response.Status.OK,
+                file.mimeType.ifBlank { "application/octet-stream" },
+                input,
+                16 * 1024
+            )
+        }
         val encodedName = URLEncoder.encode(file.name, "UTF-8").replace("+", "%20")
         response.addHeader("Content-Disposition", "attachment; filename*=UTF-8''$encodedName")
         response.addHeader("Cache-Control", "no-store")
