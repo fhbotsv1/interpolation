@@ -51,6 +51,7 @@ class MainActivity : ComponentActivity() {
     private var hostAddresses by mutableStateOf(emptyList<String>())
     private var selectedQrAddress by mutableStateOf<String?>(null)
     private var sharedFiles by mutableStateOf<List<SharedFile>>(emptyList())
+    private var receivedFiles by mutableStateOf<List<ReceivedFile>>(emptyList())
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -135,6 +136,25 @@ class MainActivity : ComponentActivity() {
                             }
                         }
 
+                        Card(Modifier.fillMaxWidth()) {
+                            Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text("RECEIVED FILES", style = MaterialTheme.typography.labelLarge)
+                                Text(
+                                    if (receivedFiles.isEmpty()) "No files received yet." else "${receivedFiles.size} file(s) received on this phone.",
+                                    style = MaterialTheme.typography.bodyMedium
+                                )
+                                receivedFiles.takeLast(10).reversed().forEach { file ->
+                                    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                                        Text(file.name, style = MaterialTheme.typography.bodyMedium)
+                                        Text(formatFileSize(file.size), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                }
+                                if (receivedFiles.size > 10) {
+                                    Text("Showing the 10 most recent uploads.", style = MaterialTheme.typography.bodySmall)
+                                }
+                            }
+                        }
+
                         if (isServerRunning) {
                             Card(Modifier.fillMaxWidth()) {
                                 Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -155,6 +175,11 @@ class MainActivity : ComponentActivity() {
                             }
                         }
 
+                        Text("Stage 3: upload to this phone", style = MaterialTheme.typography.titleMedium)
+                        Text(
+                            "Connected devices can now select files on the webpage and upload them to this phone. Received files are stored in the app private Downloads/Received folder.",
+                            style = MaterialTheme.typography.bodyMedium
+                        )
                         Text("Stage 2: browse and download", style = MaterialTheme.typography.titleMedium)
                         Text(
                             "Select files above. Devices connected to this phone can open its address to view and download the shared files. The webpage refreshes its file list automatically.",
@@ -230,7 +255,9 @@ class MainActivity : ComponentActivity() {
         statusMessage = "Starting server…"
         thread(name = "sharing-server-start") {
             try {
-                val newServer = LocalFileServer(this, { sharedFiles })
+                val newServer = LocalFileServer(this, { sharedFiles }, { received ->
+                    mainHandler.post { receivedFiles = receivedFiles + received }
+                })
                 newServer.start(SOCKET_TIMEOUT, false)
                 server = newServer
                 val addresses = getLocalIpv4Addresses()
