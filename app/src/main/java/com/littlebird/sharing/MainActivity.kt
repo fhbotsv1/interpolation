@@ -559,6 +559,7 @@ class MainActivity : ComponentActivity() {
                 mainHandler.removeCallbacks(speedUpdater)
                 uploadSpeed = "0 B/s"
                 downloadSpeed = "0 B/s"
+                connectedClients = emptyList()
                 hostAddresses = emptyList()
                 statusMessage = "Server is stopped"
             }
