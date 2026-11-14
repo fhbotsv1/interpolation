@@ -147,11 +147,11 @@ class MainActivity : ComponentActivity() {
                                 Text("LIVE TRANSFER SPEED", style = MaterialTheme.typography.labelLarge)
                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                                     Column(Modifier.weight(1f)) {
-                                        Text("Upload to phone", style = MaterialTheme.typography.bodySmall)
+                                        Text("Download to phone", style = MaterialTheme.typography.bodySmall)
                                         Text(uploadSpeed, style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary)
                                     }
                                     Column(Modifier.weight(1f)) {
-                                        Text("Download from phone", style = MaterialTheme.typography.bodySmall)
+                                        Text("Upload from phone", style = MaterialTheme.typography.bodySmall)
                                         Text(downloadSpeed, style = MaterialTheme.typography.titleLarge, color = MaterialTheme.colorScheme.primary)
                                     }
                                 }
