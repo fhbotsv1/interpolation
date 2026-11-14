@@ -32,6 +32,7 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -59,10 +60,12 @@ class MainActivity : ComponentActivity() {
     private var selectedQrAddress by mutableStateOf<String?>(null)
     private var sharedFiles by mutableStateOf<List<SharedFile>>(emptyList())
     private var receivedFiles by mutableStateOf<List<ReceivedFile>>(emptyList())
+    private var accessPin by mutableStateOf("")
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         loadReceivedFiles()
+        accessPin = getSharedPreferences("sharing_security", MODE_PRIVATE).getString("access_pin", "").orEmpty()
         setContent {
             val filePicker = rememberLauncherForActivityResult(
                 contract = ActivityResultContracts.OpenMultipleDocuments()
@@ -93,6 +96,23 @@ class MainActivity : ComponentActivity() {
                         Text("Little Bird Sharing", style = MaterialTheme.typography.headlineMedium)
                         Text("Turn this phone into a file-sharing host.", style = MaterialTheme.typography.bodyLarge)
 
+
+                        Card(Modifier.fillMaxWidth()) {
+                            Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Text("CONNECTION SECURITY", style = MaterialTheme.typography.labelLarge)
+                                OutlinedTextField(
+                                    value = accessPin,
+                                    onValueChange = { value -> accessPin = value.filter { it.isDigit() }.take(12) },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    label = { Text("Host PIN") },
+                                    placeholder = { Text("Set a 4–12 digit PIN") },
+                                    supportingText = { Text("Connected devices must enter this PIN before accessing files.") },
+                                    singleLine = true
+                                )
+                            }
+                        }
+
+
                         Card(
                             Modifier.fillMaxWidth(),
                             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
@@ -109,7 +129,7 @@ class MainActivity : ComponentActivity() {
                         }
 
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                            Button(onClick = { startServer() }, enabled = !isServerRunning, modifier = Modifier.weight(1f)) {
+                            Button(onClick = { startServer() }, enabled = !isServerRunning && accessPin.length in 4..12, modifier = Modifier.weight(1f)) {
                                 Text("Start server")
                             }
                             OutlinedButton(onClick = { stopServer() }, enabled = isServerRunning, modifier = Modifier.weight(1f)) {
@@ -343,19 +363,25 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun startServer() {
-        statusMessage = "Starting server…"
+        if (accessPin.length !in 4..12) {
+            statusMessage = "Set a PIN containing 4 to 12 digits before starting the server."
+            return
+        }
+        getSharedPreferences("sharing_security", MODE_PRIVATE)
+            .edit().putString("access_pin", accessPin).apply()
+        statusMessage = "Starting secure server…"
         thread(name = "sharing-server-start") {
             try {
                 val newServer = LocalFileServer(this, { sharedFiles }, { received ->
                     mainHandler.post { receivedFiles = receivedFiles + received }
-                })
+                }, accessPin)
                 newServer.start(SOCKET_TIMEOUT, false)
                 server = newServer
                 val addresses = getLocalIpv4Addresses()
                 mainHandler.post {
                     hostAddresses = addresses
                     isServerRunning = true
-                    statusMessage = "Listening on port " + LocalFileServer.DEFAULT_PORT
+                    statusMessage = "PIN-protected server listening on port " + LocalFileServer.DEFAULT_PORT
                 }
             } catch (error: Exception) {
                 mainHandler.post {
