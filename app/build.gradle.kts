@@ -4,10 +4,10 @@ plugins {
     alias(libs.plugins.kotlin.compose)
 }
 android {
-    namespace = "com.littlebird.sharing"
+    namespace = "com.littlebird.interpolation"
     compileSdk = 36
     defaultConfig {
-        applicationId = "com.littlebird.sharing"
+        applicationId = "com.littlebird.interpolation"
         minSdk = 26
         targetSdk = 36
         versionCode = 1
@@ -21,9 +21,7 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 }
-kotlin {
-    compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17) }
-}
+kotlin { compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17) } }
 dependencies {
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.lifecycle.runtime.ktx)
@@ -33,8 +31,6 @@ dependencies {
     implementation(libs.androidx.compose.ui.graphics)
     implementation(libs.androidx.compose.ui.tooling.preview)
     implementation(libs.androidx.compose.material3)
-    implementation("org.nanohttpd:nanohttpd:2.3.1")
-    implementation("com.google.zxing:core:3.5.3")
     debugImplementation(libs.androidx.compose.ui.tooling)
     debugImplementation(libs.androidx.compose.ui.test.manifest)
 }
