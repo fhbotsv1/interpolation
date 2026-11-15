@@ -121,24 +121,54 @@ private fun TankCalculatorScreen() {
                     Field("Upper reference (cm)", l2, { l2 = it; result = null }, Modifier.weight(1f))
                 }
             }
+            val actualTrimIsZero = trim.toDoubleOrNull() == 0.0
+            val actualLevel = level.toDoubleOrNull()
+            val lowerLevel = l1.toDoubleOrNull()
+            val upperLevel = l2.toDoubleOrNull()
+            val levelAtLowerRef = actualLevel != null && lowerLevel != null && kotlin.math.abs(actualLevel - lowerLevel) < 0.0000001
+            val levelAtUpperRef = actualLevel != null && upperLevel != null && kotlin.math.abs(actualLevel - upperLevel) < 0.0000001
             Panel("2. Trim references") {
                 Field("Actual trim (m)", trim, { trim = it; result = null })
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Field("Lower trim (m)", t1, { t1 = it; result = null }, Modifier.weight(1f))
-                    Field("Upper trim (m)", t2, { t2 = it; result = null }, Modifier.weight(1f))
+                if (!actualTrimIsZero) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Field("Lower trim (m)", t1, { t1 = it; result = null }, Modifier.weight(1f))
+                        Field("Upper trim (m)", t2, { t2 = it; result = null }, Modifier.weight(1f))
+                    }
+                } else {
+                    Text("Zero trim: trim reference values are not required.", style = MaterialTheme.typography.bodySmall)
                 }
             }
             Panel("3. Tank table volumes (m³)") {
-                Text("Enter four corner values from the tank table.", style = MaterialTheme.typography.bodySmall)
-                Text("At lower trim: " + t1 + " m", fontWeight = FontWeight.SemiBold)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Field(l1 + " cm", a, { a = it; result = null }, Modifier.weight(1f))
-                    Field(l2 + " cm", b, { b = it; result = null }, Modifier.weight(1f))
-                }
-                Text("At upper trim: " + t2 + " m", fontWeight = FontWeight.SemiBold)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Field(l1 + " cm", c, { c = it; result = null }, Modifier.weight(1f))
-                    Field(l2 + " cm", d, { d = it; result = null }, Modifier.weight(1f))
+                if (actualTrimIsZero) {
+                    Text("Enter tank-table volume(s) at zero trim.", style = MaterialTheme.typography.bodySmall)
+                    when {
+                        levelAtLowerRef -> Field("Volume at " + l1 + " cm (zero trim)", a, { a = it; result = null }, Modifier.fillMaxWidth())
+                        levelAtUpperRef -> Field("Volume at " + l2 + " cm (zero trim)", a, { a = it; result = null }, Modifier.fillMaxWidth())
+                        else -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Field(l1 + " cm (zero trim)", a, { a = it; result = null }, Modifier.weight(1f))
+                            Field(l2 + " cm (zero trim)", b, { b = it; result = null }, Modifier.weight(1f))
+                        }
+                    }
+                } else {
+                    Text("Enter values at both trim references.", style = MaterialTheme.typography.bodySmall)
+                    Text("At lower trim: " + t1 + " m", fontWeight = FontWeight.SemiBold)
+                    when {
+                        levelAtLowerRef -> Field("Volume at " + l1 + " cm", a, { a = it; result = null }, Modifier.fillMaxWidth())
+                        levelAtUpperRef -> Field("Volume at " + l2 + " cm", b, { b = it; result = null }, Modifier.fillMaxWidth())
+                        else -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Field(l1 + " cm", a, { a = it; result = null }, Modifier.weight(1f))
+                            Field(l2 + " cm", b, { b = it; result = null }, Modifier.weight(1f))
+                        }
+                    }
+                    Text("At upper trim: " + t2 + " m", fontWeight = FontWeight.SemiBold)
+                    when {
+                        levelAtLowerRef -> Field("Volume at " + l1 + " cm", c, { c = it; result = null }, Modifier.fillMaxWidth())
+                        levelAtUpperRef -> Field("Volume at " + l2 + " cm", d, { d = it; result = null }, Modifier.fillMaxWidth())
+                        else -> Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Field(l1 + " cm", c, { c = it; result = null }, Modifier.weight(1f))
+                            Field(l2 + " cm", d, { d = it; result = null }, Modifier.weight(1f))
+                        }
+                    }
                 }
             }
             Card(Modifier.fillMaxWidth()) {
