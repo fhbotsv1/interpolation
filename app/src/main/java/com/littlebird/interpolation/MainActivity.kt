@@ -93,6 +93,9 @@ private fun TankCalculatorScreen() {
     var notice by remember { mutableStateOf<String?>(null) }
 
     var selectedDate by remember { mutableStateOf(todayKey()) }
+    var entryDate by remember { mutableStateOf(todayKey()) }
+    var duplicateRecord by remember { mutableStateOf<TankRecord?>(null) }
+    var duplicateDate by remember { mutableStateOf<String?>(null) }
     var recordMode by remember { mutableStateOf("Date") }
     var recordTank by remember { mutableStateOf("") }
     var recordTankMenuExpanded by remember { mutableStateOf(false) }
@@ -107,17 +110,35 @@ private fun TankCalculatorScreen() {
             selectedDate = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(cal.time)
         }, parsed.get(Calendar.YEAR), parsed.get(Calendar.MONTH), parsed.get(Calendar.DAY_OF_MONTH)).show()
     }
+    fun chooseEntryDate() {
+        val parsed = parseDate(entryDate)
+        DatePickerDialog(context, { _, year, month, day ->
+            val cal = Calendar.getInstance().apply { set(year, month, day) }
+            entryDate = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(cal.time)
+        }, parsed.get(Calendar.YEAR), parsed.get(Calendar.MONTH), parsed.get(Calendar.DAY_OF_MONTH)).show()
+    }
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("Tank Volume Calculator", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FilterChip(selected = page == "Calculator", onClick = { page = "Calculator" }, label = { Text("Calculator") })
+            FilterChip(selected = page == "Calculator", onClick = { page = "Calculator"; entryDate = todayKey() }, label = { Text("Calculator") })
+            FilterChip(selected = page == "Missed entry", onClick = { page = "Missed entry" }, label = { Text("Missed entry") })
             FilterChip(selected = page == "Records", onClick = { page = "Records"; refreshRecords() }, label = { Text("View records") })
             FilterChip(selected = page == "Tanks", onClick = { page = "Tanks"; refreshTanks() }, label = { Text("Tanks") })
         }
 
         when (page) {
-            "Calculator" -> {
+            "Calculator", "Missed entry" -> {
+                if (page == "Missed entry") {
+                    Panel("Missed entry date") {
+                        Text("Choose the date when this tank reading was actually taken.")
+                        OutlinedButton(onClick = { chooseEntryDate() }, modifier = Modifier.fillMaxWidth()) {
+                            Text("Reading date: $entryDate  •  Change date")
+                        }
+                    }
+                } else {
+                    entryDate = todayKey()
+                }
                 Panel("Tank details") {
                     Box {
                         OutlinedButton(onClick = { tankMenuExpanded = true }, modifier = Modifier.fillMaxWidth()) {
@@ -252,11 +273,17 @@ private fun TankCalculatorScreen() {
                     }
                     Button(onClick = {
                         val rec = TankRecord(tankName.trim(), level.trim(), kind, trim.trim(), r.finalVolume.fmt())
-                        val day = todayKey()
-                        saveRecord(context, day, rec)
-                        selectedDate = day
-                        refreshRecords()
-                        notice = "Reading for ${rec.tank} saved under $day."
+                        val day = if (page == "Missed entry") entryDate else todayKey()
+                        val existing = findTankRecord(context, day, rec.tank)
+                        if (existing != null) {
+                            duplicateRecord = rec
+                            duplicateDate = day
+                        } else {
+                            saveRecord(context, day, rec)
+                            selectedDate = day
+                            refreshRecords()
+                            notice = "Reading for ${rec.tank} saved under $day."
+                        }
                     }, modifier = Modifier.fillMaxWidth()) { Text("Record this reading") }
                 }
                 notice?.let { Text(it, color = MaterialTheme.colorScheme.primary) }
@@ -335,6 +362,41 @@ private fun TankCalculatorScreen() {
                 }
             }
         }
+    }
+
+    if (duplicateRecord != null && duplicateDate != null) {
+        val proposed = duplicateRecord!!
+        val day = duplicateDate!!
+        val original = findTankRecord(context, day, proposed.tank)
+        AlertDialog(
+            onDismissRequest = { duplicateRecord = null; duplicateDate = null },
+            title = { Text("Reading already exists") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("A reading for ${proposed.tank} is already saved on $day.")
+                    Text("Previously saved volume: ${original?.volume ?: "Unknown"} m³", fontWeight = FontWeight.SemiBold)
+                    Text("New calculated volume: ${proposed.volume} m³")
+                    Text("Would you like to overwrite the existing reading?")
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    saveRecord(context, day, proposed)
+                    selectedDate = day
+                    refreshRecords()
+                    notice = "Reading for ${proposed.tank} on $day was overwritten."
+                    duplicateRecord = null
+                    duplicateDate = null
+                }) { Text("Overwrite") }
+            },
+            dismissButton = {
+                TextButton(onClick = {
+                    duplicateRecord = null
+                    duplicateDate = null
+                    notice = "Original reading was kept."
+                }) { Text("Keep original") }
+            }
+        )
     }
 
     if (tankDialogMode != null) {
@@ -442,9 +504,17 @@ private fun renameTankInRecords(context: android.content.Context, oldName: Strin
     }
     editor.apply()
 }
+private fun findTankRecord(context: android.content.Context, date: String, tank: String): TankRecord? =
+    loadRecords(context, date).firstOrNull { it.tank.equals(tank, ignoreCase = true) }
+
 private fun saveRecord(context: android.content.Context, date: String, record: TankRecord) {
     val prefs = context.getSharedPreferences("tank_readings", android.content.Context.MODE_PRIVATE)
-    val array = runCatching { JSONArray(prefs.getString(date, "[]")) }.getOrDefault(JSONArray())
+    val existing = runCatching { JSONArray(prefs.getString(date, "[]")) }.getOrDefault(JSONArray())
+    val array = JSONArray()
+    for (i in 0 until existing.length()) {
+        val item = existing.optJSONObject(i) ?: continue
+        if (!item.optString("tank").equals(record.tank, ignoreCase = true)) array.put(item)
+    }
     array.put(JSONObject().put("tank", record.tank).put("measurement", record.measurement)
         .put("kind", record.kind).put("trim", record.trim).put("volume", record.volume))
     prefs.edit().putString(date, array.toString()).apply()
