@@ -195,8 +195,24 @@ private fun TankCalculatorScreen() {
             Button(onClick = {
                 try {
                     require(tankName.trim().isNotEmpty()) { "Enter the tank name or number." }
-                    result = runCalc(level.num(), l1.num(), l2.num(), trim.num(), t1.num(), t2.num(),
-                        a.num(), b.num(), c.num(), d.num(), heel.num(), h1.num(), h2.num(), hc1.num(), hc2.num())
+                    val actualLevelValue = level.num()
+                    val lowerRef = l1.num()
+                    val upperRef = l2.num()
+                    val actualTrimValue = trim.num()
+                    val atLower = kotlin.math.abs(actualLevelValue - lowerRef) < 0.0000001
+                    val atUpper = kotlin.math.abs(actualLevelValue - upperRef) < 0.0000001
+                    val zeroTrim = actualTrimValue == 0.0
+                    val volumeA = a.num()
+                    val volumeB = if (!atLower && !atUpper) b.num() else if (zeroTrim) volumeA else 0.0
+                    val volumeC = if (zeroTrim) volumeA else if (atUpper) 0.0 else c.num()
+                    val volumeD = if (zeroTrim) volumeB else if (atLower) 0.0 else d.num()
+                    result = runCalc(
+                        actualLevelValue, lowerRef, upperRef, actualTrimValue,
+                        if (zeroTrim) 0.0 else t1.num(),
+                        if (zeroTrim) 1.0 else t2.num(),
+                        volumeA, volumeB, volumeC, volumeD,
+                        heel.num(), h1.num(), h2.num(), hc1.num(), hc2.num()
+                    )
                     error = null
                     notice = null
                 } catch (e: Exception) {
