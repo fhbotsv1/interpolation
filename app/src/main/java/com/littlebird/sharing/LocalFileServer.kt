@@ -1,25 +1,23 @@
 package com.littlebird.sharing
 
-import android.content.Context
 import android.content.ContentValues
-import android.os.Build
-import android.provider.MediaStore
+import android.content.Context
 import android.net.Uri
-import android.provider.OpenableColumns
+import android.os.Build
 import android.os.Environment
+import android.os.SystemClock
+import android.provider.MediaStore
 import fi.iki.elonen.NanoHTTPD
-import org.json.JSONArray
-import org.json.JSONObject
-import java.io.InputStream
-import java.io.FilterInputStream
-import java.io.OutputStream
 import java.io.File
+import java.io.FilterInputStream
+import java.io.InputStream
 import java.net.URLEncoder
 import java.security.MessageDigest
-import java.util.UUID
-import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
-import android.os.SystemClock
+import java.util.concurrent.ConcurrentHashMap
+import java.util.UUID
+import org.json.JSONArray
+import org.json.JSONObject
 
 data class SharedFile(
     val uri: Uri,
@@ -110,7 +108,6 @@ class LocalFileServer(
         }
     }
 
-
     private fun serveAuth(session: IHTTPSession): Response {
         return try {
             val body = HashMap<String, String>()
@@ -192,7 +189,6 @@ class LocalFileServer(
     private fun sha256(value: String): ByteArray =
         MessageDigest.getInstance("SHA-256").digest(value.toByteArray(Charsets.UTF_8))
 
-
     @Synchronized
     fun getTransferSpeeds(): TransferSpeeds {
         val now = SystemClock.elapsedRealtime()
@@ -210,7 +206,6 @@ class LocalFileServer(
         }
         return currentSpeeds
     }
-
 
     private fun recordUploadProgress(session: IHTTPSession): Response {
         val delta = session.parameters["delta"]?.firstOrNull()?.toLongOrNull() ?: 0L
