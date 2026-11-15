@@ -39,9 +39,25 @@ private fun lerp(x: Double, x1: Double, x2: Double, y1: Double, y2: Double): Dou
 private fun runCalc(level: Double, l1: Double, l2: Double, trim: Double, t1: Double, t2: Double,
                     a: Double, b: Double, c: Double, d: Double, heel: Double, h1: Double, h2: Double,
                     hc1: Double, hc2: Double): Calc {
-    val lowTrim = lerp(level, l1, l2, a, b)
-    val highTrim = lerp(level, l1, l2, c, d)
-    val trimVol = lerp(trim, t1, t2, lowTrim, highTrim)
+    require(l1 != l2) { "Lower and upper measurement references must be different." }
+    val atLower = kotlin.math.abs(level - l1) < 0.0000001
+    val atUpper = kotlin.math.abs(level - l2) < 0.0000001
+    val lowTrim: Double
+    val highTrim: Double
+    val trimVol: Double
+    if (trim == 0.0) {
+        trimVol = when {
+            atLower || atUpper -> a
+            else -> lerp(level, l1, l2, a, b)
+        }
+        lowTrim = trimVol
+        highTrim = trimVol
+    } else {
+        require(t1 != t2) { "Lower and upper trim references must be different." }
+        lowTrim = when { atLower -> a; atUpper -> b; else -> lerp(level, l1, l2, a, b) }
+        highTrim = when { atLower -> c; atUpper -> d; else -> lerp(level, l1, l2, c, d) }
+        trimVol = lerp(trim, t1, t2, lowTrim, highTrim)
+    }
     val heelCorr = lerp(heel, h1, h2, hc1, hc2)
     return Calc(lowTrim, highTrim, trimVol, heelCorr, trimVol + heelCorr)
 }
@@ -62,7 +78,7 @@ private fun TankCalculatorScreen() {
     var b by remember { mutableStateOf("") }
     var c by remember { mutableStateOf("") }
     var d by remember { mutableStateOf("") }
-    var heel by remember { mutableStateOf("0.1") }
+    var heel by remember { mutableStateOf("0") }
     var h1 by remember { mutableStateOf("0.0") }
     var h2 by remember { mutableStateOf("0.5") }
     var hc1 by remember { mutableStateOf("0.0") }
