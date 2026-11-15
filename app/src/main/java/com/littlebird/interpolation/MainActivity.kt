@@ -288,12 +288,15 @@ private fun TankCalculatorScreen() {
                             Text("Date: $selectedDate  •  Change date")
                         }
                     } else {
+                        val recordTankOptions = (tanks + allRecords.map { it.record.tank })
+                            .distinctBy { it.lowercase(Locale.getDefault()) }
+                            .sortedBy { it.lowercase(Locale.getDefault()) }
                         Box {
                             OutlinedButton(onClick = { recordTankMenuExpanded = true }, modifier = Modifier.fillMaxWidth()) {
                                 Text(if (recordTank.isBlank()) "Select tank" else recordTank)
                             }
                             DropdownMenu(expanded = recordTankMenuExpanded, onDismissRequest = { recordTankMenuExpanded = false }) {
-                                tanks.sortedBy { it.lowercase(Locale.getDefault()) }.forEach { name ->
+                                recordTankOptions.forEach { name ->
                                     DropdownMenuItem(text = { Text(name) }, onClick = { recordTank = name; recordTankMenuExpanded = false })
                                 }
                             }
