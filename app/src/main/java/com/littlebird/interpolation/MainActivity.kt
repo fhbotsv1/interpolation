@@ -377,7 +377,12 @@ private fun TankCalculatorScreen() {
                     val visibleRecords = when (recordMode) {
                         "Date" -> allRecords.filter { it.date == selectedDate }.sortedBy { it.record.tank.lowercase(Locale.getDefault()) }
                         "Tank" -> allRecords.filter { it.record.tank.equals(recordTank, ignoreCase = true) }.sortedByDescending { it.date }
-                        else -> allRecords.filter { it.date == selectedDate && it.record.content.equals(recordContent, ignoreCase = true) }.sortedBy { it.record.tank.lowercase(Locale.getDefault()) }
+                        else -> allRecords.filter { item ->
+                            val savedContent = item.record.content.ifBlank {
+                                tanks.firstOrNull { it.name.equals(item.record.tank, true) }?.content ?: ""
+                            }
+                            item.date == selectedDate && savedContent.equals(recordContent, ignoreCase = true)
+                        }.sortedBy { it.record.tank.lowercase(Locale.getDefault()) }
                     }
                     if (visibleRecords.isEmpty()) {
                         Text(when (recordMode) { "Date" -> "No readings saved for this date."; "Tank" -> "No readings found for this tank."; else -> "No tanks found for this content on this date." }, color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -388,6 +393,11 @@ private fun TankCalculatorScreen() {
                                 if (recordMode == "Tank") TableCell("Date", true, 105.dp)
                                 TableCell("Tank", true, 112.dp)
                                 if (recordMode != "Tank") TableCell("Content", true, 105.dp)
+                                if (recordMode == "Content") {
+                                    TableCell("Capacity m³", true, 105.dp)
+                                    TableCell("Max sounding cm", true, 125.dp)
+                                    TableCell("Density kg/m³", true, 115.dp)
+                                }
                                 TableCell("Measured", true, 95.dp)
                                 TableCell("Type", true, 92.dp)
                                 TableCell("Trim (m)", true, 82.dp)
@@ -397,7 +407,18 @@ private fun TankCalculatorScreen() {
                                 Row {
                                     if (recordMode == "Tank") TableCell(item.date, false, 105.dp)
                                     TableCell(item.record.tank, false, 112.dp)
-                                    if (recordMode != "Tank") TableCell(item.record.content, false, 105.dp)
+                                    if (recordMode != "Tank") {
+                                        val savedContent = item.record.content.ifBlank {
+                                            tanks.firstOrNull { it.name.equals(item.record.tank, true) }?.content ?: ""
+                                        }
+                                        TableCell(savedContent, false, 105.dp)
+                                    }
+                                    if (recordMode == "Content") {
+                                        val info = tanks.firstOrNull { it.name.equals(item.record.tank, true) }
+                                        TableCell(info?.totalCapacity ?: "—", false, 105.dp)
+                                        TableCell(info?.maxSounding ?: "—", false, 125.dp)
+                                        TableCell(info?.density ?: "—", false, 115.dp)
+                                    }
                                     TableCell(item.record.measurement, false, 95.dp)
                                     TableCell(item.record.kind, false, 92.dp)
                                     TableCell(item.record.trim, false, 82.dp)
@@ -408,7 +429,7 @@ private fun TankCalculatorScreen() {
                         if (recordMode == "Content" && visibleRecords.isNotEmpty()) {
                             val total = visibleRecords.sumOf { it.record.volume.toDoubleOrNull() ?: 0.0 }
                             HorizontalDivider()
-                            Text("Total for ${visibleRecords.size} tank(s): ${total.fmt()} m³", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                            Text("Total volume for ${recordContent}: ${total.fmt()} m³ across ${visibleRecords.size} tank(s) on ${selectedDate}", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
@@ -458,7 +479,7 @@ private fun TankCalculatorScreen() {
             title = { Text(when (mode) { "Add" -> "Add tank"; "Edit" -> "Edit tank details"; else -> "Delete tank" }) },
             text = {
                 if (mode == "Delete") Text("Delete tank '$tankDraft' from the tank list? Previously saved readings will not be deleted.")
-                else Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                else Column(Modifier.heightIn(max = 520.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedTextField(value = tankDraft, onValueChange = { tankDraft = it; tankDialogError = null }, label = { Text("Tank name / number") }, singleLine = true)
                     OutlinedTextField(value = tankCapacityDraft, onValueChange = { tankCapacityDraft = it.filter { ch -> ch.isDigit() || ch == '.' } }, label = { Text("Total capacity (m³)") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
                     OutlinedTextField(value = tankContentDraft, onValueChange = { tankContentDraft = it }, label = { Text("Content") }, singleLine = true)
