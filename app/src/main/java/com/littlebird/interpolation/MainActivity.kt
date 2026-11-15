@@ -30,7 +30,8 @@ class MainActivity : ComponentActivity() {
 }
 
 private data class Calc(val atTrimLow: Double, val atTrimHigh: Double, val trimVolume: Double, val heelCorrection: Double, val finalVolume: Double)
-private data class TankRecord(val tank: String, val measurement: String, val kind: String, val trim: String, val volume: String)
+private data class TankInfo(val name: String, val totalCapacity: String, val content: String, val maxSounding: String, val density: String)
+private data class TankRecord(val tank: String, val measurement: String, val kind: String, val trim: String, val volume: String, val content: String = "")
 private data class DatedRecord(val date: String, val record: TankRecord)
 
 private fun lerp(x: Double, x1: Double, x2: Double, y1: Double, y2: Double): Double {
@@ -64,11 +65,15 @@ private fun runCalc(level: Double, l1: Double, l2: Double, trim: Double, t1: Dou
 private fun TankCalculatorScreen() {
     val context = androidx.compose.ui.platform.LocalContext.current
     var page by remember { mutableStateOf("Calculator") }
-    var tanks by remember { mutableStateOf(loadTanks(context)) }
+    var tanks by remember { mutableStateOf(loadTankInfos(context)) }
     var tankName by remember { mutableStateOf("") }
     var tankMenuExpanded by remember { mutableStateOf(false) }
     var tankDialogMode by remember { mutableStateOf<String?>(null) }
     var tankDraft by remember { mutableStateOf("") }
+    var tankCapacityDraft by remember { mutableStateOf("") }
+    var tankContentDraft by remember { mutableStateOf("") }
+    var tankMaxSoundingDraft by remember { mutableStateOf("") }
+    var tankDensityDraft by remember { mutableStateOf("") }
     var tankDialogError by remember { mutableStateOf<String?>(null) }
 
     var kind by remember { mutableStateOf("Sounding") }
@@ -98,10 +103,12 @@ private fun TankCalculatorScreen() {
     var duplicateDate by remember { mutableStateOf<String?>(null) }
     var recordMode by remember { mutableStateOf("Date") }
     var recordTank by remember { mutableStateOf("") }
+    var recordContent by remember { mutableStateOf("") }
+    var recordContentMenuExpanded by remember { mutableStateOf(false) }
     var recordTankMenuExpanded by remember { mutableStateOf(false) }
     var allRecords by remember { mutableStateOf(loadAllRecords(context)) }
 
-    fun refreshTanks() { tanks = loadTanks(context) }
+    fun refreshTanks() { tanks = loadTankInfos(context) }
     fun refreshRecords() { allRecords = loadAllRecords(context) }
     fun chooseDate() {
         val parsed = parseDate(selectedDate)
@@ -167,9 +174,9 @@ private fun TankCalculatorScreen() {
                             Text(if (tankName.isBlank()) "Select tank" else tankName)
                         }
                         DropdownMenu(expanded = tankMenuExpanded, onDismissRequest = { tankMenuExpanded = false }) {
-                            tanks.sortedBy { it.lowercase(Locale.getDefault()) }.forEach { name ->
-                                DropdownMenuItem(text = { Text(name) }, onClick = {
-                                    tankName = name; tankMenuExpanded = false; result = null
+                            tanks.sortedBy { it.name.lowercase(Locale.getDefault()) }.forEach { info ->
+                                DropdownMenuItem(text = { Text(info.name) }, onClick = {
+                                    tankName = info.name; tankMenuExpanded = false; result = null
                                 })
                             }
                             if (tanks.isEmpty()) DropdownMenuItem(text = { Text("No tanks added yet") }, onClick = { tankMenuExpanded = false })
@@ -294,7 +301,8 @@ private fun TankCalculatorScreen() {
                         }
                     }
                     Button(onClick = {
-                        val rec = TankRecord(tankName.trim(), level.trim(), kind, trim.trim(), r.finalVolume.fmt())
+                        val tankInfo = tanks.firstOrNull { it.name.equals(tankName.trim(), true) }
+                        val rec = TankRecord(tankName.trim(), level.trim(), kind, trim.trim(), r.finalVolume.fmt(), tankInfo?.content ?: "")
                         val day = if (page == "Missed entry") entryDate else todayKey()
                         val existing = findTankRecord(context, day, rec.tank)
                         if (existing != null) {
@@ -313,14 +321,18 @@ private fun TankCalculatorScreen() {
             }
             "Tanks" -> {
                 Panel("Manage tanks") {
-                    Text("Add tank names or numbers. These will appear alphabetically in the calculator.")
-                    Button(onClick = { tankDialogMode = "Add"; tankDraft = ""; tankDialogError = null }, modifier = Modifier.fillMaxWidth()) { Text("Add tank") }
+                    Text("Maintain the tank particulars used by the calculator and content-wise reports.")
+                    Button(onClick = { tankDialogMode = "Add"; tankDraft = ""; tankCapacityDraft = ""; tankContentDraft = ""; tankMaxSoundingDraft = ""; tankDensityDraft = ""; tankDialogError = null }, modifier = Modifier.fillMaxWidth()) { Text("Add tank") }
                     if (tanks.isEmpty()) Text("No tanks have been added.", color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    tanks.sortedBy { it.lowercase(Locale.getDefault()) }.forEach { name ->
-                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text(name, modifier = Modifier.weight(1f))
-                            TextButton(onClick = { tankName = name; tankDraft = name; tankDraftOriginalName = name; tankDialogMode = "Rename"; tankDialogError = null }) { Text("Rename") }
-                            TextButton(onClick = { tankDraft = name; tankDialogMode = "Delete"; tankDialogError = null }, colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)) { Text("Delete") }
+                    tanks.sortedBy { it.name.lowercase(Locale.getDefault()) }.forEach { info ->
+                        Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                            Text(info.name, fontWeight = FontWeight.SemiBold)
+                            Text("Capacity: ${info.totalCapacity.ifBlank { "—" }} m³  •  Content: ${info.content.ifBlank { "—" }}")
+                            Text("Max sounding: ${info.maxSounding.ifBlank { "—" }} cm  •  Density: ${info.density.ifBlank { "—" }}", style = MaterialTheme.typography.bodySmall)
+                            Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
+                                TextButton(onClick = { tankName = info.name; tankDraft = info.name; tankDraftOriginalName = info.name; tankCapacityDraft = info.totalCapacity; tankContentDraft = info.content; tankMaxSoundingDraft = info.maxSounding; tankDensityDraft = info.density; tankDialogMode = "Edit"; tankDialogError = null }) { Text("Edit") }
+                                TextButton(onClick = { tankDraft = info.name; tankDialogMode = "Delete"; tankDialogError = null }, colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)) { Text("Delete") }
+                            }
                         }
                         HorizontalDivider()
                     }
@@ -331,13 +343,14 @@ private fun TankCalculatorScreen() {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         FilterChip(selected = recordMode == "Date", onClick = { recordMode = "Date" }, label = { Text("By date") })
                         FilterChip(selected = recordMode == "Tank", onClick = { recordMode = "Tank" }, label = { Text("By tank") })
+                        FilterChip(selected = recordMode == "Content", onClick = { recordMode = "Content" }, label = { Text("By content") })
                     }
                     if (recordMode == "Date") {
                         OutlinedButton(onClick = { chooseDate() }, modifier = Modifier.fillMaxWidth()) {
                             Text("Date: $selectedDate  •  Change date")
                         }
-                    } else {
-                        val recordTankOptions = (tanks + allRecords.map { it.record.tank })
+                    } else if (recordMode == "Tank") {
+                        val recordTankOptions = (tanks.map { it.name } + allRecords.map { it.record.tank })
                             .distinctBy { it.lowercase(Locale.getDefault()) }
                             .sortedBy { it.lowercase(Locale.getDefault()) }
                         Box {
@@ -351,19 +364,30 @@ private fun TankCalculatorScreen() {
                             }
                         }
                     }
-                    val visibleRecords = if (recordMode == "Date") {
-                        allRecords.filter { it.date == selectedDate }.sortedBy { it.record.tank.lowercase(Locale.getDefault()) }
-                    } else {
-                        allRecords.filter { it.record.tank.equals(recordTank, ignoreCase = true) }.sortedByDescending { it.date }
+                    if (recordMode == "Content") {
+                        OutlinedButton(onClick = { chooseDate() }, modifier = Modifier.fillMaxWidth()) { Text("Date: $selectedDate  •  Change date") }
+                        val contentOptions = (tanks.map { it.content } + allRecords.map { it.record.content }).filter { it.isNotBlank() }.distinctBy { it.trim().lowercase(Locale.getDefault()) }.sortedBy { it.lowercase(Locale.getDefault()) }
+                        Box {
+                            OutlinedButton(onClick = { recordContentMenuExpanded = true }, modifier = Modifier.fillMaxWidth()) { Text(if (recordContent.isBlank()) "Select content" else recordContent) }
+                            DropdownMenu(expanded = recordContentMenuExpanded, onDismissRequest = { recordContentMenuExpanded = false }) {
+                                contentOptions.forEach { item -> DropdownMenuItem(text = { Text(item) }, onClick = { recordContent = item; recordContentMenuExpanded = false }) }
+                            }
+                        }
+                    }
+                    val visibleRecords = when (recordMode) {
+                        "Date" -> allRecords.filter { it.date == selectedDate }.sortedBy { it.record.tank.lowercase(Locale.getDefault()) }
+                        "Tank" -> allRecords.filter { it.record.tank.equals(recordTank, ignoreCase = true) }.sortedByDescending { it.date }
+                        else -> allRecords.filter { it.date == selectedDate && it.record.content.equals(recordContent, ignoreCase = true) }.sortedBy { it.record.tank.lowercase(Locale.getDefault()) }
                     }
                     if (visibleRecords.isEmpty()) {
-                        Text(if (recordMode == "Date") "No readings saved for this date." else "No readings found for this tank.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(when (recordMode) { "Date" -> "No readings saved for this date."; "Tank" -> "No readings found for this tank."; else -> "No tanks found for this content on this date." }, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     } else {
                         Text("${visibleRecords.size} reading(s)", fontWeight = FontWeight.SemiBold)
                         Column(Modifier.horizontalScroll(rememberScrollState())) {
                             Row {
                                 if (recordMode == "Tank") TableCell("Date", true, 105.dp)
                                 TableCell("Tank", true, 112.dp)
+                                if (recordMode != "Tank") TableCell("Content", true, 105.dp)
                                 TableCell("Measured", true, 95.dp)
                                 TableCell("Type", true, 92.dp)
                                 TableCell("Trim (m)", true, 82.dp)
@@ -373,12 +397,18 @@ private fun TankCalculatorScreen() {
                                 Row {
                                     if (recordMode == "Tank") TableCell(item.date, false, 105.dp)
                                     TableCell(item.record.tank, false, 112.dp)
+                                    if (recordMode != "Tank") TableCell(item.record.content, false, 105.dp)
                                     TableCell(item.record.measurement, false, 95.dp)
                                     TableCell(item.record.kind, false, 92.dp)
                                     TableCell(item.record.trim, false, 82.dp)
                                     TableCell(item.record.volume, false, 112.dp)
                                 }
                             }
+                        }
+                        if (recordMode == "Content" && visibleRecords.isNotEmpty()) {
+                            val total = visibleRecords.sumOf { it.record.volume.toDoubleOrNull() ?: 0.0 }
+                            HorizontalDivider()
+                            Text("Total for ${visibleRecords.size} tank(s): ${total.fmt()} m³", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                         }
                     }
                 }
@@ -425,47 +455,47 @@ private fun TankCalculatorScreen() {
         val mode = tankDialogMode!!
         AlertDialog(
             onDismissRequest = { tankDialogMode = null },
-            title = { Text(when (mode) { "Add" -> "Add tank"; "Rename" -> "Rename tank"; else -> "Delete tank" }) },
+            title = { Text(when (mode) { "Add" -> "Add tank"; "Edit" -> "Edit tank details"; else -> "Delete tank" }) },
             text = {
                 if (mode == "Delete") Text("Delete tank '$tankDraft' from the tank list? Previously saved readings will not be deleted.")
-                else Column {
-                    OutlinedTextField(value = tankDraft, onValueChange = { tankDraft = it; tankDialogError = null },
-                        label = { Text("Tank name / number") }, singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Text))
+                else Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(value = tankDraft, onValueChange = { tankDraft = it; tankDialogError = null }, label = { Text("Tank name / number") }, singleLine = true)
+                    OutlinedTextField(value = tankCapacityDraft, onValueChange = { tankCapacityDraft = it.filter { ch -> ch.isDigit() || ch == '.' } }, label = { Text("Total capacity (m³)") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
+                    OutlinedTextField(value = tankContentDraft, onValueChange = { tankContentDraft = it }, label = { Text("Content") }, singleLine = true)
+                    OutlinedTextField(value = tankMaxSoundingDraft, onValueChange = { tankMaxSoundingDraft = it.filter { ch -> ch.isDigit() || ch == '.' } }, label = { Text("Maximum sounding (cm)") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
+                    OutlinedTextField(value = tankDensityDraft, onValueChange = { tankDensityDraft = it.filter { ch -> ch.isDigit() || ch == '.' } }, label = { Text("Content density (kg/m³)") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
                     tankDialogError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                 }
             },
             confirmButton = {
                 TextButton(onClick = {
                     when (mode) {
-                        "Add" -> {
-                            val name = tankDraft.trim()
-                            when {
-                                name.isEmpty() -> tankDialogError = "Enter a tank name."
-                                tanks.any { it.equals(name, true) } -> tankDialogError = "This tank already exists."
-                                else -> { saveTanks(context, tanks + name); refreshTanks(); tankName = name; tankDialogMode = null }
-                            }
-                        }
-                        "Rename" -> {
-                            val name = tankDraft.trim()
-                            when {
-                                name.isEmpty() -> tankDialogError = "Enter a tank name."
-                                tanks.any { it.equals(name, true) && !it.equals(tankDraftOriginalName, true) } -> tankDialogError = "This tank already exists."
-                                else -> {
-                                    val oldName = tanks.firstOrNull { it.equals(tankDraftOriginalName, true) }
-                                    val target = oldName ?: tankDraftOriginalName
-                                    val updated = tanks.map { if (it == target) name else it }
-                                    saveTanks(context, updated); renameTankInRecords(context, target, name); refreshTanks(); refreshRecords()
-                                    if (tankName == target) tankName = name
-                                    tankDialogMode = null
-                                }
-                            }
+                        "Delete" -> {
+                            saveTankInfos(context, tanks.filterNot { it.name.equals(tankDraft, true) })
+                            if (tankName.equals(tankDraft, true)) tankName = ""
+                            refreshTanks(); tankDialogMode = null
                         }
                         else -> {
-                            saveTanks(context, tanks.filterNot { it.equals(tankDraft, true) })
-                            if (tankName.equals(tankDraft, true)) tankName = ""
-                            refreshTanks()
-                            tankDialogMode = null
+                            val name = tankDraft.trim()
+                            val duplicate = if (mode == "Add") tanks.any { it.name.equals(name, true) } else tanks.any { it.name.equals(name, true) && !it.name.equals(tankDraftOriginalName, true) }
+                            when {
+                                name.isEmpty() -> tankDialogError = "Enter a tank name."
+                                duplicate -> tankDialogError = "This tank already exists."
+                                tankCapacityDraft.toDoubleOrNull() == null || tankCapacityDraft.toDouble() <= 0.0 -> tankDialogError = "Enter a valid total capacity."
+                                tankContentDraft.trim().isEmpty() -> tankDialogError = "Enter the tank content."
+                                tankMaxSoundingDraft.toDoubleOrNull() == null || tankMaxSoundingDraft.toDouble() <= 0.0 -> tankDialogError = "Enter a valid maximum sounding."
+                                tankDensityDraft.toDoubleOrNull() == null || tankDensityDraft.toDouble() <= 0.0 -> tankDialogError = "Enter a valid content density."
+                                else -> {
+                                    val info = TankInfo(name, tankCapacityDraft.trim(), tankContentDraft.trim(), tankMaxSoundingDraft.trim(), tankDensityDraft.trim())
+                                    val updated = if (mode == "Add") tanks + info else tanks.map { if (it.name.equals(tankDraftOriginalName, true)) info else it }
+                                    saveTankInfos(context, updated)
+                                    if (mode == "Edit" && !name.equals(tankDraftOriginalName, true)) {
+                                        renameTankInRecords(context, tankDraftOriginalName, name)
+                                        if (tankName.equals(tankDraftOriginalName, true)) tankName = name
+                                    } else if (mode == "Add") tankName = name
+                                    refreshTanks(); refreshRecords(); tankDialogMode = null
+                                }
+                            }
                         }
                     }
                 }) { Text(if (mode == "Delete") "Delete" else "Save") }
@@ -482,13 +512,24 @@ private fun parseDate(value: String): Calendar {
     val date = runCatching { SimpleDateFormat("yyyy-MM-dd", Locale.US).parse(value) }.getOrNull() ?: Date()
     return Calendar.getInstance().apply { time = date }
 }
-private fun loadTanks(context: android.content.Context): List<String> {
+private fun loadTankInfos(context: android.content.Context): List<TankInfo> {
     val raw = context.getSharedPreferences("tank_list", android.content.Context.MODE_PRIVATE).getString("tanks", "[]") ?: "[]"
-    return runCatching { val a = JSONArray(raw); (0 until a.length()).map { a.getString(it) } }.getOrDefault(emptyList())
+    return runCatching {
+        val a = JSONArray(raw)
+        (0 until a.length()).mapNotNull { i ->
+            when (val item = a.get(i)) {
+                is String -> TankInfo(item, "", "", "", "")
+                is JSONObject -> TankInfo(item.optString("name"), item.optString("totalCapacity"), item.optString("content"), item.optString("maxSounding"), item.optString("density"))
+                else -> null
+            }
+        }
+    }.getOrDefault(emptyList())
 }
-private fun saveTanks(context: android.content.Context, tanks: List<String>) {
+private fun saveTankInfos(context: android.content.Context, tanks: List<TankInfo>) {
     val array = JSONArray()
-    tanks.distinctBy { it.lowercase(Locale.getDefault()) }.forEach { array.put(it) }
+    tanks.distinctBy { it.name.lowercase(Locale.getDefault()) }.forEach { info ->
+        array.put(JSONObject().put("name", info.name).put("totalCapacity", info.totalCapacity).put("content", info.content).put("maxSounding", info.maxSounding).put("density", info.density))
+    }
     context.getSharedPreferences("tank_list", android.content.Context.MODE_PRIVATE).edit().putString("tanks", array.toString()).apply()
 }
 private fun loadRecords(context: android.content.Context, date: String): List<TankRecord> {
@@ -499,7 +540,7 @@ private fun parseRecords(raw: String): List<TankRecord> = runCatching {
     val array = JSONArray(raw)
     (0 until array.length()).map { i ->
         val o = array.getJSONObject(i)
-        TankRecord(o.optString("tank"), o.optString("measurement"), o.optString("kind"), o.optString("trim"), o.optString("volume"))
+        TankRecord(o.optString("tank"), o.optString("measurement"), o.optString("kind"), o.optString("trim"), o.optString("volume"), o.optString("content"))
     }
 }.getOrDefault(emptyList())
 private fun loadAllRecords(context: android.content.Context): List<DatedRecord> {
@@ -520,7 +561,7 @@ private fun renameTankInRecords(context: android.content.Context, oldName: Strin
         val array = JSONArray()
         updated.forEach { rec ->
             array.put(JSONObject().put("tank", rec.tank).put("measurement", rec.measurement)
-                .put("kind", rec.kind).put("trim", rec.trim).put("volume", rec.volume))
+                .put("kind", rec.kind).put("trim", rec.trim).put("volume", rec.volume).put("content", rec.content))
         }
         editor.putString(date, array.toString())
     }
@@ -538,7 +579,7 @@ private fun saveRecord(context: android.content.Context, date: String, record: T
         if (!item.optString("tank").equals(record.tank, ignoreCase = true)) array.put(item)
     }
     array.put(JSONObject().put("tank", record.tank).put("measurement", record.measurement)
-        .put("kind", record.kind).put("trim", record.trim).put("volume", record.volume))
+        .put("kind", record.kind).put("trim", record.trim).put("volume", record.volume).put("content", record.content))
     prefs.edit().putString(date, array.toString()).apply()
 }
 
