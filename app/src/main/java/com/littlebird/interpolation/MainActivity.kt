@@ -92,7 +92,7 @@ private fun TankCalculatorScreen() {
 
         if (page == "Calculator") {
             Panel("Tank details") {
-                Field("Tank name / number", tankName, { tankName = it; result = null }, Modifier.fillMaxWidth())
+                Field("Tank name / number", tankName, { tankName = it; result = null }, Modifier.fillMaxWidth(), allowText = true)
             }
             Panel("1. Actual tank measurement") {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -248,8 +248,8 @@ private fun saveRecord(context: android.content.Context, date: String, record: T
         }
     }
 }
-@Composable private fun Field(label: String, value: String, change: (String) -> Unit, modifier: Modifier = Modifier) {
-    OutlinedTextField(value, { change(it.filter { ch -> ch.isDigit() || ch == '.' || ch == '-' }) },
+@Composable private fun Field(label: String, value: String, change: (String) -> Unit, modifier: Modifier = Modifier, allowText: Boolean = false) {
+    OutlinedTextField(value, { next -> change(if (allowText) next else next.filter { ch -> ch.isDigit() || ch == '.' || ch == '-' }) },
         label = { Text(label) }, modifier = modifier, singleLine = true,
         keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
 }
