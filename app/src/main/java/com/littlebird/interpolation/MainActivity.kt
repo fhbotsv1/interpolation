@@ -363,12 +363,12 @@ private fun TankCalculatorScreen() {
                             val name = tankDraft.trim()
                             when {
                                 name.isEmpty() -> tankDialogError = "Enter a tank name."
-                                tanks.any { it.equals(name, true) && !it.equals(tankDraft, true) } -> tankDialogError = "This tank already exists."
+                                tanks.any { it.equals(name, true) && !it.equals(tankDraftOriginalName, true) } -> tankDialogError = "This tank already exists."
                                 else -> {
                                     val oldName = tanks.firstOrNull { it.equals(tankDraftOriginalName, true) }
                                     val target = oldName ?: tankDraftOriginalName
                                     val updated = tanks.map { if (it == target) name else it }
-                                    saveTanks(context, updated); refreshTanks()
+                                    saveTanks(context, updated); renameTankInRecords(context, target, name); refreshTanks(); refreshRecords()
                                     if (tankName == target) tankName = name
                                     tankDialogMode = null
                                 }
@@ -421,6 +421,23 @@ private fun loadAllRecords(context: android.content.Context): List<DatedRecord> 
         val raw = value as? String ?: return@mapNotNull null
         parseRecords(raw).map { DatedRecord(date, it) }
     }.flatten()
+}
+private fun renameTankInRecords(context: android.content.Context, oldName: String, newName: String) {
+    val prefs = context.getSharedPreferences("tank_readings", android.content.Context.MODE_PRIVATE)
+    val editor = prefs.edit()
+    prefs.all.forEach { (date, value) ->
+        val raw = value as? String ?: return@forEach
+        val updated = parseRecords(raw).map { rec ->
+            if (rec.tank.equals(oldName, true)) rec.copy(tank = newName) else rec
+        }
+        val array = JSONArray()
+        updated.forEach { rec ->
+            array.put(JSONObject().put("tank", rec.tank).put("measurement", rec.measurement)
+                .put("kind", rec.kind).put("trim", rec.trim).put("volume", rec.volume))
+        }
+        editor.putString(date, array.toString())
+    }
+    editor.apply()
 }
 private fun saveRecord(context: android.content.Context, date: String, record: TankRecord) {
     val prefs = context.getSharedPreferences("tank_readings", android.content.Context.MODE_PRIVATE)
