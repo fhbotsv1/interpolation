@@ -608,7 +608,7 @@ class LocalFileServer(
                   failedUploadFile = file;
                   uploadStatus.textContent = 'Upload failed: ' + file.name + '. ' + error.message + ' You can retry this file.';
                   retryUploadButton.hidden = false;
-                  uploadButton.disabled = false;
+                  uploadButton.disabled = true;
                   return;
                 }
               }
@@ -646,7 +646,7 @@ class LocalFileServer(
               } catch (error) {
                 uploadStatus.textContent = 'Retry failed: ' + failedUploadFile.name + '. ' + error.message;
                 retryUploadButton.hidden = false;
-                uploadButton.disabled = false;
+                uploadButton.disabled = true;
               } finally {
                 retryUploadButton.disabled = false;
                 retryUploadButton.textContent = 'Retry failed upload';
