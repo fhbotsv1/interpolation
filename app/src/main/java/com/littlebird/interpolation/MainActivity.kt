@@ -202,10 +202,12 @@ private fun TankCalculatorScreen() {
                     val atLower = kotlin.math.abs(actualLevelValue - lowerRef) < 0.0000001
                     val atUpper = kotlin.math.abs(actualLevelValue - upperRef) < 0.0000001
                     val zeroTrim = actualTrimValue == 0.0
-                    val volumeA = a.num()
-                    val volumeB = if (!atLower && !atUpper) b.num() else if (zeroTrim) volumeA else 0.0
-                    val volumeC = if (zeroTrim) volumeA else if (atUpper) 0.0 else c.num()
-                    val volumeD = if (zeroTrim) volumeB else if (atLower) 0.0 else d.num()
+                    val volumeA = if (atUpper && !zeroTrim) 0.0 else a.num()
+                    val volumeB = if (!atLower && !atUpper) b.num() else if (zeroTrim) {
+                        if (atLower || atUpper) 0.0 else b.num()
+                    } else if (atUpper) b.num() else 0.0
+                    val volumeC = if (zeroTrim || atUpper) 0.0 else c.num()
+                    val volumeD = if (zeroTrim || atLower) 0.0 else d.num()
                     result = runCalc(
                         actualLevelValue, lowerRef, upperRef, actualTrimValue,
                         if (zeroTrim) 0.0 else t1.num(),
