@@ -136,8 +136,6 @@ private fun TankCalculatorScreen() {
                             Text("Reading date: $entryDate  •  Change date")
                         }
                     }
-                } else {
-                    entryDate = todayKey()
                 }
                 Panel("Tank details") {
                     Box {
