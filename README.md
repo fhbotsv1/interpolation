@@ -1,16 +1,22 @@
-# Little Bird Sharing
+# Little Bird Tank Interpolation
 
-An Android app that turns a phone into a local file-sharing host. Other devices will connect through a browser on the same Wi-Fi network or the phone's hotspot.
+Android tank-volume calculator for sounding or ullage measurements, trim interpolation, and heel correction.
 
 ## Stage 1
-- App ID: `com.littlebird.sharing`
+- Application ID: `com.littlebird.interpolation`
 - Kotlin, Jetpack Compose and Material 3
-- Embedded NanoHTTPD server with start/stop controls
-- Displays local IPv4 address and port
-- Basic browser status page and `/health` endpoint
+- Interpolation across two measurement references and two trim references
+- Linear heel-correction interpolation
+- Calculation breakdown and corrected volume in m³
 - Minimum Android 8.0 (API 26), compile SDK 36, JDK 17
 - Target ABI: arm64-v8a only
 
-Open in Android Studio, sync Gradle, then build and run on an arm64-v8a device. Connect another device to the same Wi-Fi, start the server, and open the displayed address in its browser.
+## Calculation
+1. Interpolate tank volume between the lower and upper sounding/ullage references at each trim reference.
+2. Interpolate those two volumes at the actual trim.
+3. Interpolate heel correction between the two heel references.
+4. Add heel correction to the trim-interpolated volume.
 
-The server currently runs while the app process is alive. File transfers, QR connection, hotspot support and a foreground service are planned for later stages.
+Four corner volumes are required: two measurement references at each of two trim references. Enter values from the vessel's approved tank calibration table and verify results against the approved tables before operational use.
+
+Open in Android Studio, sync Gradle, then build and run on an arm64-v8a device.
