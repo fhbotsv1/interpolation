@@ -1,15 +1,13 @@
 package com.littlebird.sharing
 
-import android.graphics.Bitmap
+import android.content.ContentUris
 import android.content.Intent
+import android.graphics.Bitmap
 import android.net.Uri
 import android.os.Build
-import android.content.ContentUris
-import androidx.core.content.FileProvider
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
-import android.provider.OpenableColumns
 import android.provider.MediaStore
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -18,12 +16,12 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.AlertDialog
@@ -37,24 +35,25 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
+import androidx.core.content.FileProvider
 import com.google.zxing.BarcodeFormat
 import com.google.zxing.qrcode.QRCodeWriter
-import org.json.JSONArray
-import org.json.JSONObject
+import java.io.File
+import java.net.Inet4Address
+import java.net.NetworkInterface
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import java.net.Inet4Address
-import java.net.NetworkInterface
-import java.io.File
 import kotlin.concurrent.thread
+import org.json.JSONArray
+import org.json.JSONObject
 
 class MainActivity : ComponentActivity() {
     private var server: LocalFileServer? = null
@@ -123,7 +122,6 @@ class MainActivity : ComponentActivity() {
                         Text("Little Bird Sharing", style = MaterialTheme.typography.headlineMedium)
                         Text("Turn this phone into a file-sharing host.", style = MaterialTheme.typography.bodyLarge)
 
-
                         Card(Modifier.fillMaxWidth()) {
                             Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                                 Text("CONNECTION SECURITY", style = MaterialTheme.typography.labelLarge)
@@ -140,7 +138,6 @@ class MainActivity : ComponentActivity() {
                             }
                         }
 
-
                         Card(
                             Modifier.fillMaxWidth(),
                             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
@@ -155,7 +152,6 @@ class MainActivity : ComponentActivity() {
                                 Text(statusMessage)
                             }
                         }
-
 
                         Card(Modifier.fillMaxWidth()) {
                             Column(Modifier.padding(18.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
