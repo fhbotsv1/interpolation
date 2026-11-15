@@ -1,9 +1,0 @@
-<?xml version="1.0" encoding="utf-8"?>
-<paths xmlns:android="http://schemas.android.com/apk/res/android">
-    <external-files-path
-        name="received_external_downloads"
-        path="Download/Received/" />
-    <files-path
-        name="received_internal"
-        path="Received/" />
-</paths>
