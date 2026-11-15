@@ -120,11 +120,35 @@ private fun TankCalculatorScreen() {
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("Tank Volume Calculator", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FilterChip(selected = page == "Calculator", onClick = { page = "Calculator"; entryDate = todayKey() }, label = { Text("Calculator") })
-            FilterChip(selected = page == "Missed entry", onClick = { page = "Missed entry" }, label = { Text("Missed entry") })
-            FilterChip(selected = page == "Records", onClick = { page = "Records"; refreshRecords() }, label = { Text("View records") })
-            FilterChip(selected = page == "Tanks", onClick = { page = "Tanks"; refreshTanks() }, label = { Text("Tanks") })
+        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(
+                    modifier = Modifier.weight(1f),
+                    selected = page == "Calculator",
+                    onClick = { page = "Calculator"; entryDate = todayKey() },
+                    label = { Text("Calculator", maxLines = 1) }
+                )
+                FilterChip(
+                    modifier = Modifier.weight(1f),
+                    selected = page == "Missed entry",
+                    onClick = { page = "Missed entry" },
+                    label = { Text("Missed entry", maxLines = 1) }
+                )
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(
+                    modifier = Modifier.weight(1f),
+                    selected = page == "Records",
+                    onClick = { page = "Records"; refreshRecords() },
+                    label = { Text("View records", maxLines = 1) }
+                )
+                FilterChip(
+                    modifier = Modifier.weight(1f),
+                    selected = page == "Tanks",
+                    onClick = { page = "Tanks"; refreshTanks() },
+                    label = { Text("Tanks", maxLines = 1) }
+                )
+            }
         }
 
         when (page) {
