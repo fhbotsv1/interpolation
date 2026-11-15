@@ -482,6 +482,8 @@ class LocalFileServer(
             input[type=file] { width: 100%; margin: 8px 0 12px; }
             button.upload { width: 100%; padding: 12px 16px; border: 0; border-radius: 10px; background: #16804a; color: white; font-weight: 700; font-size: 15px; }
             button.upload:disabled { opacity: .55; }
+            button.retry { width:100%; margin-top:10px; padding:11px 16px; border:1px solid #2563eb; border-radius:10px; background:#fff; color:#2563eb; font-weight:700; }
+            button.retry:disabled { opacity:.55; }
             #upload-status { margin-top: 10px; color: #526174; font-size: 13px; overflow-wrap: anywhere; }
             .progress { height: 8px; margin-top: 10px; border-radius: 8px; background: #e5eaf1; overflow: hidden; }
             #progress-bar { width: 0; height: 100%; background: #16804a; transition: width .15s; }
@@ -514,6 +516,7 @@ class LocalFileServer(
             <section class="upload-panel">
               <input id="upload-input" type="file" multiple>
               <button class="upload" id="upload-button" type="button">Upload selected files</button>
+              <button class="retry" id="retry-upload-button" type="button" hidden>Retry failed upload</button>
               <div class="progress"><div id="progress-bar"></div></div>
               <div id="upload-status" role="status">Choose one or more files to send to the host.</div>
             </section>
@@ -550,51 +553,104 @@ class LocalFileServer(
             const uploadButton = document.getElementById('upload-button');
             const uploadStatus = document.getElementById('upload-status');
             const progressBar = document.getElementById('progress-bar');
-            uploadButton.addEventListener('click', async () => {
-              const files = Array.from(uploadInput.files || []);
-              if (!files.length) { uploadStatus.textContent = 'Select at least one file first.'; return; }
+            const retryUploadButton = document.getElementById('retry-upload-button');
+            let uploadQueue = [];
+            let uploadIndex = 0;
+            let failedUploadFile = null;
+            let completedUploads = 0;
+
+            function uploadOneFile(file, index, total) {
+              return new Promise((resolve, reject) => {
+                uploadStatus.textContent = 'Uploading ' + file.name + ' (' + (index + 1) + '/' + total + ')…';
+                const form = new FormData();
+                form.append('file', file, file.name);
+                const xhr = new XMLHttpRequest();
+                xhr.open('POST', '/upload');
+                xhr.setRequestHeader('X-Auth-Token', authToken);
+                let reportedBytes = 0;
+                xhr.upload.onprogress = event => {
+                  if (event.lengthComputable) {
+                    const overall = ((completedUploads + event.loaded / event.total) / total) * 100;
+                    progressBar.style.width = overall + '%';
+                  }
+                  const delta = event.loaded - reportedBytes;
+                  if (delta > 0) {
+                    reportedBytes = event.loaded;
+                    fetch('/api/upload-progress?delta=' + delta, {
+                      method: 'GET',
+                      headers: authHeaders(),
+                      cache: 'no-store'
+                    }).catch(() => {});
+                  }
+                };
+                xhr.onload = () => xhr.status >= 200 && xhr.status < 300
+                  ? resolve()
+                  : reject(new Error(xhr.responseText || 'Upload failed (HTTP ' + xhr.status + ')'));
+                xhr.onerror = () => reject(new Error('Network error during upload'));
+                xhr.ontimeout = () => reject(new Error('Upload timed out'));
+                xhr.timeout = 0;
+                xhr.send(form);
+              });
+            }
+
+            async function continueUploadQueue() {
               uploadButton.disabled = true;
-              let completed = 0;
-              for (const file of files) {
-                uploadStatus.textContent = 'Uploading ' + file.name + ' (' + (completed + 1) + '/' + files.length + ')…';
+              retryUploadButton.hidden = true;
+              while (uploadIndex < uploadQueue.length) {
+                const file = uploadQueue[uploadIndex];
                 try {
-                  await new Promise((resolve, reject) => {
-                    const form = new FormData();
-                    form.append('file', file, file.name);
-                    const xhr = new XMLHttpRequest();
-                    xhr.open('POST', '/upload');
-                    xhr.setRequestHeader('X-Auth-Token', authToken);
-                    let reportedBytes = 0;
-                    xhr.upload.onprogress = event => {
-                      if (event.lengthComputable) {
-                        const overall = ((completed + event.loaded / event.total) / files.length) * 100;
-                        progressBar.style.width = overall + '%';
-                      }
-                      const delta = event.loaded - reportedBytes;
-                      if (delta > 0) {
-                        reportedBytes = event.loaded;
-                        fetch('/api/upload-progress?delta=' + delta, {
-                          method: 'GET',
-                          headers: authHeaders(),
-                          cache: 'no-store'
-                        }).catch(() => {});
-                      }
-                    };
-                    xhr.onload = () => xhr.status >= 200 && xhr.status < 300 ? resolve() : reject(new Error(xhr.responseText || 'Upload failed'));
-                    xhr.onerror = () => reject(new Error('Network error during upload'));
-                    xhr.send(form);
-                  });
-                  completed++;
-                  progressBar.style.width = (completed / files.length * 100) + '%';
+                  await uploadOneFile(file, uploadIndex, uploadQueue.length);
+                  completedUploads++;
+                  uploadIndex++;
+                  failedUploadFile = null;
+                  progressBar.style.width = (completedUploads / uploadQueue.length * 100) + '%';
                 } catch (error) {
-                  uploadStatus.textContent = 'Failed: ' + file.name + '. ' + error.message;
+                  failedUploadFile = file;
+                  uploadStatus.textContent = 'Upload failed: ' + file.name + '. ' + error.message + ' You can retry this file.';
+                  retryUploadButton.hidden = false;
                   uploadButton.disabled = false;
                   return;
                 }
               }
-              uploadStatus.textContent = completed + ' file(s) uploaded successfully.';
+              uploadStatus.textContent = completedUploads + ' file(s) uploaded successfully.';
               uploadInput.value = '';
+              uploadQueue = [];
+              uploadIndex = 0;
+              completedUploads = 0;
+              failedUploadFile = null;
               uploadButton.disabled = false;
+            }
+
+            uploadButton.addEventListener('click', () => {
+              const files = Array.from(uploadInput.files || []);
+              if (!files.length) { uploadStatus.textContent = 'Select at least one file first.'; return; }
+              uploadQueue = files;
+              uploadIndex = 0;
+              completedUploads = 0;
+              failedUploadFile = null;
+              progressBar.style.width = '0%';
+              continueUploadQueue();
+            });
+
+            retryUploadButton.addEventListener('click', async () => {
+              if (!failedUploadFile) return;
+              retryUploadButton.disabled = true;
+              retryUploadButton.textContent = 'Retrying…';
+              try {
+                await uploadOneFile(failedUploadFile, uploadIndex, uploadQueue.length);
+                completedUploads++;
+                uploadIndex++;
+                failedUploadFile = null;
+                progressBar.style.width = (completedUploads / uploadQueue.length * 100) + '%';
+                await continueUploadQueue();
+              } catch (error) {
+                uploadStatus.textContent = 'Retry failed: ' + failedUploadFile.name + '. ' + error.message;
+                retryUploadButton.hidden = false;
+                uploadButton.disabled = false;
+              } finally {
+                retryUploadButton.disabled = false;
+                retryUploadButton.textContent = 'Retry failed upload';
+              }
             });
             function formatSize(bytes) {
               if (!bytes || bytes < 0) return 'Size unavailable';
