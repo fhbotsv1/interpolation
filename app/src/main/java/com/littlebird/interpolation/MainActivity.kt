@@ -340,10 +340,14 @@ private fun TankCalculatorScreen() {
             }
             else -> {
                 Panel("Saved tank readings") {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        FilterChip(selected = recordMode == "Date", onClick = { recordMode = "Date" }, label = { Text("By date") })
-                        FilterChip(selected = recordMode == "Tank", onClick = { recordMode = "Tank" }, label = { Text("By tank") })
-                        FilterChip(selected = recordMode == "Content", onClick = { recordMode = "Content" }, label = { Text("By content") })
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            FilterChip(selected = recordMode == "Date", onClick = { recordMode = "Date" }, label = { Text("By date") })
+                            FilterChip(selected = recordMode == "Tank", onClick = { recordMode = "Tank" }, label = { Text("By tank") })
+                        }
+                        Row {
+                            FilterChip(selected = recordMode == "Content", onClick = { recordMode = "Content" }, label = { Text("By content") })
+                        }
                     }
                     if (recordMode == "Date") {
                         OutlinedButton(onClick = { chooseDate() }, modifier = Modifier.fillMaxWidth()) {
