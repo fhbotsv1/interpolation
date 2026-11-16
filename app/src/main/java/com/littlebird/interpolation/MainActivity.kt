@@ -187,8 +187,8 @@ private fun TankCalculatorScreen() {
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("Tank Volume Calculator", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            FilterChip(modifier = Modifier.weight(1f), selected = !isBunker, onClick = { if (isBunker) { isBunker = false; tanks = loadTankInfos(context, "tank_list"); allRecords = loadAllRecords(context, "tank_readings"); recordMode = "Date"; result = null; notice = null } }, label = { Text("Engine Room") })
-            FilterChip(modifier = Modifier.weight(1f), selected = isBunker, onClick = { if (!isBunker) { isBunker = true; tanks = loadTankInfos(context, "bunker_tank_list"); allRecords = loadAllRecords(context, "bunker_tank_readings"); recordMode = "Date"; result = null; notice = null } }, label = { Text("Bunker") })
+            FilterChip(modifier = Modifier.weight(1f), selected = !isBunker, onClick = { if (isBunker) { isBunker = false; tanks = loadTankInfos(context, "tank_list"); allRecords = loadAllRecords(context, "tank_readings"); tankName = ""; recordMode = "Date"; result = null; notice = null } }, label = { Text("Engine Room") })
+            FilterChip(modifier = Modifier.weight(1f), selected = isBunker, onClick = { if (!isBunker) { isBunker = true; tanks = loadTankInfos(context, "bunker_tank_list"); allRecords = loadAllRecords(context, "bunker_tank_readings"); tankName = ""; recordMode = "Date"; result = null; notice = null } }, label = { Text("Bunker") })
         }
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -437,10 +437,10 @@ private fun TankCalculatorScreen() {
                                 OutputLine("Current temperature", "${r.temperature?.fmt(2)} °C")
                                 OutputLine("Density at 15°C", "${r.density15?.fmt(2)} kg/m³")
                                 OutputLine("Linear coefficient mass", "${r.linearMass?.fmt(3)} MT", true)
-                                OutputLine("API/ASTM Table 54B VCF", r.astmVcf?.fmt(6) ?: "—")
-                                OutputLine("API/ASTM fuel-oil mass", "${r.astmMass?.fmt(3)} MT", true)
+                                OutputLine("API/ASTM Table 54B (1980) VCF", r.astmVcf?.fmt(6) ?: "—")
+                                OutputLine("API/ASTM Table 54B (1980) mass", "${r.astmMass?.fmt(3)} MT", true)
                                 OutputLine("Mass difference", "${((r.linearMass ?: 0.0) - (r.astmMass ?: 0.0)).fmt(3)} MT")
-                                Text("API/ASTM Table 54B generalized fuel-oil correlation; temperature correction only, atmospheric pressure assumed. Verify against approved onboard tables and cargo documentation.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                Text("1980 API MPMS Table 54B generalized fuel-oil correlation; temperature correction only, atmospheric pressure assumed. This is not a certified implementation of the current ASTM D1250-25 adjunct. Verify against approved onboard tables and cargo documentation.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                             }
                         }
                     }
@@ -981,7 +981,7 @@ private fun writeReadingsXlsx(
     val hasBunkerMass = rows.any { it.record.astmMass.isNotBlank() || it.record.linearMass.isNotBlank() }
     sheetRows.add(listOf(reportTitle))
     val headers = mutableListOf("Date", "Tank", "Content", "Total capacity (m³)", "Maximum sounding (cm)", "Density (kg/m³)", "Measurement", "Measurement type", "Trim (m)", "Corrected volume (m³)")
-    if (hasBunkerMass) headers.addAll(listOf("Temperature (°C)", "Density at 15°C (kg/m³)", "Linear mass (MT)", "API/ASTM 54B mass (MT)", "API/ASTM 54B VCF"))
+    if (hasBunkerMass) headers.addAll(listOf("Temperature (°C)", "Density at 15°C (kg/m³)", "Linear mass (MT)", "API/ASTM 54B (1980) mass (MT)", "API/ASTM 54B (1980) VCF"))
     sheetRows.add(headers)
     rows.forEach { item ->
         val info = tankInfoFor(item.record.tank, tanks)
@@ -996,7 +996,7 @@ private fun writeReadingsXlsx(
         sheetRows.add(listOf("Total corrected volume (m³)", rows.sumOf { it.record.volume.toDoubleOrNull() ?: 0.0 }.fmt()))
         if (hasBunkerMass) {
             sheetRows.add(listOf("Total linear mass (MT)", rows.sumOf { it.record.linearMass.toDoubleOrNull() ?: 0.0 }.fmt()))
-            sheetRows.add(listOf("Total API/ASTM 54B mass (MT)", rows.sumOf { it.record.astmMass.toDoubleOrNull() ?: 0.0 }.fmt()))
+            sheetRows.add(listOf("Total API/ASTM 54B (1980) mass (MT)", rows.sumOf { it.record.astmMass.toDoubleOrNull() ?: 0.0 }.fmt()))
         }
     }
     val sheetXml = buildString {
