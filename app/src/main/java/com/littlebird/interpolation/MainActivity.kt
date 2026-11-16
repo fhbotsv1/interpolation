@@ -114,6 +114,9 @@ private fun TankCalculatorScreen() {
     var recordContent by remember { mutableStateOf("") }
     var recordContentMenuExpanded by remember { mutableStateOf(false) }
     var recordTankMenuExpanded by remember { mutableStateOf(false) }
+    var contentRangeStart by remember { mutableStateOf(dateOffsetKey(-30)) }
+    var contentRangeEnd by remember { mutableStateOf(todayKey()) }
+    var selectedContentTanks by remember { mutableStateOf<Set<String>>(emptySet()) }
     var allRecords by remember { mutableStateOf(loadAllRecords(context)) }
     var exportDialogOpen by remember { mutableStateOf(false) }
     var exportRows by remember { mutableStateOf<List<DatedRecord>>(emptyList()) }
@@ -148,6 +151,15 @@ private fun TankCalculatorScreen() {
         DatePickerDialog(context, { _, year, month, day ->
             val cal = Calendar.getInstance().apply { set(year, month, day) }
             entryDate = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(cal.time)
+        }, parsed.get(Calendar.YEAR), parsed.get(Calendar.MONTH), parsed.get(Calendar.DAY_OF_MONTH)).show()
+    }
+    fun chooseContentRangeDate(isStart: Boolean) {
+        val current = if (isStart) contentRangeStart else contentRangeEnd
+        val parsed = parseDate(current)
+        DatePickerDialog(context, { _, year, month, day ->
+            val cal = Calendar.getInstance().apply { set(year, month, day) }
+            val chosen = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(cal.time)
+            if (isStart) contentRangeStart = chosen else contentRangeEnd = chosen
         }, parsed.get(Calendar.YEAR), parsed.get(Calendar.MONTH), parsed.get(Calendar.DAY_OF_MONTH)).show()
     }
 
@@ -395,27 +407,57 @@ private fun TankCalculatorScreen() {
                         }
                     }
                     if (recordMode == "Content") {
-                        OutlinedButton(onClick = { chooseDate() }, modifier = Modifier.fillMaxWidth()) { Text("Date: $selectedDate  •  Change date") }
-                        val contentOptions = (tanks.map { it.content } + allRecords.map { it.record.content }).filter { it.isNotBlank() }.distinctBy { it.trim().lowercase(Locale.getDefault()) }.sortedBy { it.lowercase(Locale.getDefault()) }
-                        Box {
-                            OutlinedButton(onClick = { recordContentMenuExpanded = true }, modifier = Modifier.fillMaxWidth()) { Text(if (recordContent.isBlank()) "Select content" else recordContent) }
-                            DropdownMenu(expanded = recordContentMenuExpanded, onDismissRequest = { recordContentMenuExpanded = false }) {
-                                contentOptions.forEach { item -> DropdownMenuItem(text = { Text(item) }, onClick = { recordContent = item; recordContentMenuExpanded = false }) }
+                        Text("Choose a date range. The summary compares the end date with the start date.")
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(onClick = { chooseContentRangeDate(true) }, modifier = Modifier.weight(1f)) {
+                                Text("From: $contentRangeStart", maxLines = 1)
                             }
+                            OutlinedButton(onClick = { chooseContentRangeDate(false) }, modifier = Modifier.weight(1f)) {
+                                Text("To: $contentRangeEnd", maxLines = 1)
+                            }
+                        }
+                        val selectableTankNames = (tanks.map { it.name } + allRecords.map { it.record.tank })
+                            .distinctBy { it.lowercase(Locale.getDefault()) }
+                            .sortedBy { it.lowercase(Locale.getDefault()) }
+                        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                            Text("Select tanks (\${selectedContentTanks.size} selected)", fontWeight = FontWeight.SemiBold)
+                            Row {
+                                TextButton(onClick = { selectedContentTanks = selectableTankNames.toSet() }) { Text("All") }
+                                TextButton(onClick = { selectedContentTanks = emptySet() }) { Text("Clear") }
+                            }
+                        }
+                        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                            selectableTankNames.forEach { tank ->
+                                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Checkbox(
+                                        checked = selectedContentTanks.contains(tank),
+                                        onCheckedChange = { checked ->
+                                            selectedContentTanks = if (checked) selectedContentTanks + tank
+                                                else selectedContentTanks - tank
+                                        }
+                                    )
+                                    Text(tank, modifier = Modifier.padding(top = 12.dp))
+                                }
+                            }
+                        }
+                        if (contentRangeStart > contentRangeEnd) {
+                            Text("The start date must be on or before the end date.", color = MaterialTheme.colorScheme.error)
                         }
                     }
                     val visibleRecords = when (recordMode) {
                         "Date" -> allRecords.filter { it.date == selectedDate }.sortedBy { it.record.tank.lowercase(Locale.getDefault()) }
                         "Tank" -> allRecords.filter { it.record.tank.equals(recordTank, ignoreCase = true) }.sortedByDescending { it.date }
                         else -> allRecords.filter { item ->
-                            val savedContent = item.record.content.ifBlank {
-                                tanks.firstOrNull { it.name.equals(item.record.tank, true) }?.content ?: ""
-                            }
-                            item.date == selectedDate && savedContent.equals(recordContent, ignoreCase = true)
-                        }.sortedBy { it.record.tank.lowercase(Locale.getDefault()) }
+                            item.date >= contentRangeStart && item.date <= contentRangeEnd &&
+                                selectedContentTanks.any { it.equals(item.record.tank, ignoreCase = true) }
+                        }.sortedWith(compareBy<DatedRecord> { it.date }.thenBy { it.record.tank.lowercase(Locale.getDefault()) })
                     }
-                    if (visibleRecords.isEmpty()) {
-                        Text(when (recordMode) { "Date" -> "No readings saved for this date."; "Tank" -> "No readings found for this tank."; else -> "No tanks found for this content on this date." }, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    if (recordMode == "Content" && contentRangeStart > contentRangeEnd) {
+                        Text("Correct the date range to view readings.", color = MaterialTheme.colorScheme.error)
+                    } else if (recordMode == "Content" && selectedContentTanks.isEmpty()) {
+                        Text("Select at least one tank to view its content summary.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    } else if (visibleRecords.isEmpty()) {
+                        Text(when (recordMode) { "Date" -> "No readings saved for this date."; "Tank" -> "No readings found for this tank."; else -> "No readings found for the selected tanks and date range." }, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     } else {
                         Text("${visibleRecords.size} reading(s)", fontWeight = FontWeight.SemiBold)
                         OutlinedButton(onClick = {
@@ -424,7 +466,7 @@ private fun TankCalculatorScreen() {
                             exportLabel = when (recordMode) {
                                 "Date" -> "Tank readings $selectedDate"
                                 "Tank" -> "Tank readings $recordTank"
-                                else -> "$recordContent readings $selectedDate"
+                                else -> "Content readings $contentRangeStart to $contentRangeEnd"
                             }
                             exportMessage = null
                             exportDialogOpen = true
@@ -434,7 +476,7 @@ private fun TankCalculatorScreen() {
                         exportMessage?.let { Text(it, color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodySmall) }
                         Column(Modifier.horizontalScroll(rememberScrollState())) {
                             Row {
-                                if (recordMode == "Tank") TableCell("Date", true, 105.dp)
+                                if (recordMode == "Tank" || recordMode == "Content") TableCell("Date", true, 105.dp)
                                 TableCell("Tank", true, 112.dp)
                                 if (recordMode != "Tank") TableCell("Content", true, 105.dp)
                                 if (recordMode == "Content") {
@@ -449,7 +491,7 @@ private fun TankCalculatorScreen() {
                             }
                             visibleRecords.forEach { item ->
                                 Row {
-                                    if (recordMode == "Tank") TableCell(item.date, false, 105.dp)
+                                    if (recordMode == "Tank" || recordMode == "Content") TableCell(item.date, false, 105.dp)
                                     TableCell(item.record.tank, false, 112.dp)
                                     if (recordMode != "Tank") {
                                         val savedContent = item.record.content.ifBlank {
@@ -471,9 +513,31 @@ private fun TankCalculatorScreen() {
                             }
                         }
                         if (recordMode == "Content" && visibleRecords.isNotEmpty()) {
-                            val total = visibleRecords.sumOf { it.record.volume.toDoubleOrNull() ?: 0.0 }
+                            val groupedByContent = visibleRecords.groupBy { recordContentFor(it.record, tanks).ifBlank { "Unspecified content" } }
                             HorizontalDivider()
-                            Text("Total volume for ${recordContent}: ${total.fmt()} m³ across ${visibleRecords.size} tank(s) on ${selectedDate}", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                            Text("Content summary", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                            Text("Current volume is calculated on $contentRangeEnd. Generated volume is the change from $contentRangeStart to $contentRangeEnd.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            groupedByContent.toSortedMap(String.CASE_INSENSITIVE_ORDER).forEach { (contentName, contentRows) ->
+                                val endRows = contentRows.filter { it.date == contentRangeEnd }
+                                val startRows = contentRows.filter { it.date == contentRangeStart }
+                                val startByTank = startRows.associateBy { it.record.tank.lowercase(Locale.getDefault()) }
+                                val comparable = endRows.mapNotNull { endItem ->
+                                    val startItem = startByTank[endItem.record.tank.lowercase(Locale.getDefault())]
+                                    if (startItem == null) null else
+                                        (endItem.record.volume.toDoubleOrNull() ?: 0.0) -
+                                            (startItem.record.volume.toDoubleOrNull() ?: 0.0)
+                                }
+                                val currentVolume = endRows.sumOf { it.record.volume.toDoubleOrNull() ?: 0.0 }
+                                val generatedVolume = comparable.sum()
+                                Card(Modifier.fillMaxWidth()) {
+                                    Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                                        Text(contentName, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                                        OutputLine("Current volume ($contentRangeEnd)", "\${currentVolume.fmt()} m³")
+                                        OutputLine("Total generated / change", "\${if (generatedVolume > 0) "+" else ""}\${generatedVolume.fmt()} m³")
+                                        Text("Compared across \${comparable.size} tank(s) with readings on both dates; \${endRows.size} tank(s) have end-date readings.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -787,6 +851,10 @@ private fun writeReadingsPdf(
     }
 }
 
+private fun dateOffsetKey(days: Int): String {
+    val calendar = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, days) }
+    return SimpleDateFormat("yyyy-MM-dd", Locale.US).format(calendar.time)
+}
 private fun todayKey(): String = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
 private fun parseDate(value: String): Calendar {
     val date = runCatching { SimpleDateFormat("yyyy-MM-dd", Locale.US).parse(value) }.getOrNull() ?: Date()
