@@ -87,9 +87,13 @@ private fun TankCalculatorScreen() {
     var kind by remember { mutableStateOf("Sounding") }
     var level by remember { mutableStateOf("510") }
     val calculatorSettings = remember { context.getSharedPreferences("calculator_settings", android.content.Context.MODE_PRIVATE) }
-    var referenceIntervalCm by remember { mutableIntStateOf(calculatorSettings.getInt("reference_interval_cm", 50).takeIf { it in listOf(10, 25, 50) } ?: 50) }
-    var volumePrecision by remember { mutableIntStateOf(calculatorSettings.getInt("volume_precision", 3).coerceIn(0, 4)) }
+    var referenceIntervalCm by remember { mutableIntStateOf(calculatorSettings.getInt("reference_interval_cm", 50).takeIf { it > 0 } ?: 50) }
+    var referenceIntervals by remember { mutableStateOf(loadReferenceIntervals(context)) }
     var intervalMenuExpanded by remember { mutableStateOf(false) }
+    var addIntervalDialogOpen by remember { mutableStateOf(false) }
+    var customIntervalDraft by remember { mutableStateOf("") }
+    var customIntervalError by remember { mutableStateOf<String?>(null) }
+    var volumePrecision by remember { mutableIntStateOf(calculatorSettings.getInt("volume_precision", 3).coerceIn(0, 4)) }
     var precisionMenuExpanded by remember { mutableStateOf(false) }
     var trim by remember { mutableStateOf("0.15") }
     var t1 by remember { mutableStateOf("0.1") }
@@ -141,9 +145,10 @@ private fun TankCalculatorScreen() {
         }
     }
 
-    LaunchedEffect(referenceIntervalCm, volumePrecision) {
+    LaunchedEffect(referenceIntervalCm, referenceIntervals, volumePrecision) {
         calculatorSettings.edit()
             .putInt("reference_interval_cm", referenceIntervalCm)
+            .putString("reference_intervals_cm", referenceIntervals.joinToString(","))
             .putInt("volume_precision", volumePrecision)
             .apply()
     }
@@ -245,13 +250,23 @@ private fun TankCalculatorScreen() {
                                 Text("Interval: $referenceIntervalCm cm")
                             }
                             DropdownMenu(expanded = intervalMenuExpanded, onDismissRequest = { intervalMenuExpanded = false }) {
-                                listOf(10, 25, 50).forEach { option ->
+                                referenceIntervals.forEach { option ->
                                     DropdownMenuItem(text = { Text("$option cm") }, onClick = {
                                         referenceIntervalCm = option
                                         intervalMenuExpanded = false
                                         result = null
                                     })
                                 }
+                                Divider()
+                                DropdownMenuItem(
+                                    text = { Text("＋ Add custom interval") },
+                                    onClick = {
+                                        intervalMenuExpanded = false
+                                        customIntervalDraft = ""
+                                        customIntervalError = null
+                                        addIntervalDialogOpen = true
+                                    }
+                                )
                             }
                         }
                         Box(Modifier.weight(1f)) {
@@ -717,6 +732,50 @@ private fun TankCalculatorScreen() {
         )
     }
 
+    if (addIntervalDialogOpen) {
+        AlertDialog(
+            onDismissRequest = { addIntervalDialogOpen = false },
+            title = { Text("Add custom interval") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(
+                        value = customIntervalDraft,
+                        onValueChange = { customIntervalDraft = it.filter { ch -> ch.isDigit() } ; customIntervalError = null },
+                        label = { Text("Interval in cm") },
+                        singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number)
+                    )
+                    Text("Enter a positive whole number, such as 1, 2 or 5 cm. The list keeps the four smallest intervals.", style = MaterialTheme.typography.bodySmall)
+                    customIntervalError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val value = customIntervalDraft.toIntOrNull()
+                    when {
+                        value == null || value <= 0 -> customIntervalError = "Enter a valid interval greater than zero."
+                        value in referenceIntervals -> {
+                            referenceIntervalCm = value
+                            addIntervalDialogOpen = false
+                        }
+                        else -> {
+                            val updated = (referenceIntervals + value).distinct().sorted().take(4)
+                            if (value !in updated) {
+                                customIntervalError = "This interval is larger than the four intervals currently retained."
+                            } else {
+                                referenceIntervals = updated
+                                referenceIntervalCm = value
+                                addIntervalDialogOpen = false
+                                result = null
+                            }
+                        }
+                    }
+                }) { Text("Add") }
+            },
+            dismissButton = { TextButton(onClick = { addIntervalDialogOpen = false }) { Text("Cancel") } }
+        )
+    }
+
     if (tankDialogMode != null) {
         val mode = tankDialogMode!!
         AlertDialog(
@@ -969,6 +1028,14 @@ private fun parseDate(value: String): Calendar {
     val date = runCatching { SimpleDateFormat("yyyy-MM-dd", Locale.US).parse(value) }.getOrNull() ?: Date()
     return Calendar.getInstance().apply { time = date }
 }
+private fun loadReferenceIntervals(context: android.content.Context): List<Int> {
+    val prefs = context.getSharedPreferences("calculator_settings", android.content.Context.MODE_PRIVATE)
+    val stored = prefs.getString("reference_intervals_cm", null)
+    val parsed = stored?.split(",")?.mapNotNull { it.trim().toIntOrNull()?.takeIf { value -> value > 0 } }
+    return (parsed?.takeIf { it.isNotEmpty() } ?: listOf(10, 25, 50, 100))
+        .distinct().sorted().take(4)
+}
+
 private fun loadTankInfos(context: android.content.Context): List<TankInfo> {
     val raw = context.getSharedPreferences("tank_list", android.content.Context.MODE_PRIVATE).getString("tanks", "[]") ?: "[]"
     return runCatching {
