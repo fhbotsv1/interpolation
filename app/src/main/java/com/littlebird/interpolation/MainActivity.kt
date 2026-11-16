@@ -186,9 +186,9 @@ private fun TankCalculatorScreen() {
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("Tank Volume Calculator", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-            SegmentedButton(selected = !isBunker, onClick = { if (isBunker) { isBunker = false; tanks = loadTankInfos(context, "tank_list"); allRecords = loadAllRecords(context, "tank_readings"); result = null; notice = null } }, shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2)) { Text("Engine Room") }
-            SegmentedButton(selected = isBunker, onClick = { if (!isBunker) { isBunker = true; tanks = loadTankInfos(context, "bunker_tank_list"); allRecords = loadAllRecords(context, "bunker_tank_readings"); result = null; notice = null } }, shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2)) { Text("Bunker") }
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            FilterChip(modifier = Modifier.weight(1f), selected = !isBunker, onClick = { if (isBunker) { isBunker = false; tanks = loadTankInfos(context, "tank_list"); allRecords = loadAllRecords(context, "tank_readings"); recordMode = "Date"; result = null; notice = null } }, label = { Text("Engine Room") })
+            FilterChip(modifier = Modifier.weight(1f), selected = isBunker, onClick = { if (!isBunker) { isBunker = true; tanks = loadTankInfos(context, "bunker_tank_list"); allRecords = loadAllRecords(context, "bunker_tank_readings"); recordMode = "Date"; result = null; notice = null } }, label = { Text("Bunker") })
         }
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -651,7 +651,7 @@ private fun TankCalculatorScreen() {
                                         val info = tanks.firstOrNull { it.name.equals(item.record.tank, true) }
                                         TableCell(info?.totalCapacity ?: "—", false, 105.dp)
                                         TableCell(info?.maxSounding ?: "—", false, 125.dp)
-                                        TableCell(info?.density ?: "—", false, 115.dp)
+                                        TableCell((if (isBunker) info?.density15 else info?.density) ?: "—", false, 115.dp)
                                     }
                                     TableCell(item.record.measurement, false, 95.dp)
                                     TableCell(item.record.kind, false, 92.dp)
@@ -757,7 +757,7 @@ private fun TankCalculatorScreen() {
             confirmButton = {
                 TextButton(
                     onClick = {
-                        context.getSharedPreferences("tank_readings", android.content.Context.MODE_PRIVATE)
+                        context.getSharedPreferences(recordPrefsName, android.content.Context.MODE_PRIVATE)
                             .edit().clear().commit()
                         refreshRecords()
                         deleteRecordsConfirmStage = 0
@@ -978,19 +978,26 @@ private fun writeReadingsXlsx(
     includeTotal: Boolean
 ) {
     val sheetRows = mutableListOf<List<String>>()
+    val hasBunkerMass = rows.any { it.record.astmMass.isNotBlank() || it.record.linearMass.isNotBlank() }
     sheetRows.add(listOf(reportTitle))
-    sheetRows.add(listOf("Date", "Tank", "Content", "Total capacity (m³)", "Maximum sounding (cm)", "Density (kg/m³)", "Measurement", "Measurement type", "Trim (m)", "Corrected volume (m³)"))
+    val headers = mutableListOf("Date", "Tank", "Content", "Total capacity (m³)", "Maximum sounding (cm)", "Density (kg/m³)", "Measurement", "Measurement type", "Trim (m)", "Corrected volume (m³)")
+    if (hasBunkerMass) headers.addAll(listOf("Temperature (°C)", "Density at 15°C (kg/m³)", "Linear mass (MT)", "API/ASTM 54B mass (MT)", "API/ASTM 54B VCF"))
+    sheetRows.add(headers)
     rows.forEach { item ->
         val info = tankInfoFor(item.record.tank, tanks)
-        sheetRows.add(listOf(
-            item.date, item.record.tank, recordContentFor(item.record, tanks),
-            info?.totalCapacity ?: "", info?.maxSounding ?: "", info?.density ?: "",
-            item.record.measurement, item.record.kind, item.record.trim, item.record.volume
-        ))
+        val values = mutableListOf(item.date, item.record.tank, recordContentFor(item.record, tanks),
+            info?.totalCapacity ?: "", info?.maxSounding ?: "", (if (hasBunkerMass) info?.density15 else info?.density) ?: "",
+            item.record.measurement, item.record.kind, item.record.trim, item.record.volume)
+        if (hasBunkerMass) values.addAll(listOf(item.record.temperature, item.record.density15, item.record.linearMass, item.record.astmMass, item.record.astmVcf))
+        sheetRows.add(values)
     }
     if (includeTotal && rows.isNotEmpty()) {
         sheetRows.add(emptyList())
         sheetRows.add(listOf("Total corrected volume (m³)", rows.sumOf { it.record.volume.toDoubleOrNull() ?: 0.0 }.fmt()))
+        if (hasBunkerMass) {
+            sheetRows.add(listOf("Total linear mass (MT)", rows.sumOf { it.record.linearMass.toDoubleOrNull() ?: 0.0 }.fmt()))
+            sheetRows.add(listOf("Total API/ASTM 54B mass (MT)", rows.sumOf { it.record.astmMass.toDoubleOrNull() ?: 0.0 }.fmt()))
+        }
     }
     val sheetXml = buildString {
         append("""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>""")
@@ -1065,7 +1072,8 @@ private fun writeReadingsPdf(
     includeTotal: Boolean
 ) {
     val document = PdfDocument()
-    val pageWidth = 842
+    val hasBunkerMass = rows.any { it.record.astmMass.isNotBlank() || it.record.linearMass.isNotBlank() }
+    val pageWidth = if (hasBunkerMass) 1040 else 842
     val pageHeight = 595
     val margin = 28f
     val rowHeight = 28f
@@ -1073,8 +1081,9 @@ private fun writeReadingsPdf(
     val headerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 8.5f; typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD) }
     val bodyPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 8.5f }
     val mutedPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 9f }
-    val headers = listOf("Date", "Tank", "Content", "Capacity", "Max sound.", "Density", "Measured", "Type", "Trim", "Corrected m³")
-    val widths = listOf(65f, 72f, 75f, 65f, 65f, 60f, 62f, 55f, 48f, 75f)
+    val headers = mutableListOf("Date", "Tank", "Content", "Capacity", "Max sound.", "Density", "Measured", "Type", "Trim", "Corrected m³")
+    val widths = mutableListOf(65f, 72f, 75f, 65f, 65f, 60f, 62f, 55f, 48f, 75f)
+    if (hasBunkerMass) { headers.addAll(listOf("Temp °C", "Density15", "Linear MT", "ASTM MT", "VCF")); widths.addAll(listOf(50f, 65f, 60f, 60f, 55f)) }
     val rowsPerPage = 15
     val pageCount = maxOf(1, (rows.size + rowsPerPage - 1) / rowsPerPage)
     for (pageIndex in 0 until pageCount) {
@@ -1098,11 +1107,12 @@ private fun writeReadingsPdf(
         for (i in start until end) {
             val item = rows[i]
             val info = tankInfoFor(item.record.tank, tanks)
-            val values = listOf(
+            val values = mutableListOf(
                 item.date, item.record.tank, recordContentFor(item.record, tanks),
-                info?.totalCapacity ?: "—", info?.maxSounding ?: "—", info?.density ?: "—",
+                info?.totalCapacity ?: "—", info?.maxSounding ?: "—", (if (hasBunkerMass) info?.density15 else info?.density) ?: "—",
                 item.record.measurement, item.record.kind, item.record.trim, item.record.volume
             )
+            if (hasBunkerMass) values.addAll(listOf(item.record.temperature, item.record.density15, item.record.linearMass, item.record.astmMass, item.record.astmVcf))
             x = margin
             values.forEachIndexed { index, value ->
                 val maxChars = (widths[index] / 5f).toInt().coerceAtLeast(5)
@@ -1117,6 +1127,10 @@ private fun writeReadingsPdf(
             val total = rows.sumOf { it.record.volume.toDoubleOrNull() ?: 0.0 }
             val totalPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 11f; typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD) }
             canvas.drawText("Total corrected volume: ${total.fmt()} m³", margin, y, totalPaint)
+            if (hasBunkerMass) {
+                y += 16f
+                canvas.drawText("Total linear mass: ${rows.sumOf { it.record.linearMass.toDoubleOrNull() ?: 0.0 }.fmt()} MT    Total API/ASTM 54B mass: ${rows.sumOf { it.record.astmMass.toDoubleOrNull() ?: 0.0 }.fmt()} MT", margin, y, totalPaint)
+            }
         }
         document.finishPage(page)
     }
