@@ -27,6 +27,8 @@ import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
 import java.util.Locale
+import java.util.zip.ZipEntry
+import java.util.zip.ZipOutputStream
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -118,9 +120,9 @@ private fun TankCalculatorScreen() {
     var exportLabel by remember { mutableStateOf("Tank readings") }
     var exportMessage by remember { mutableStateOf<String?>(null) }
 
-    val csvExportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri: Uri? ->
+    val csvExportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")) { uri: Uri? ->
         if (uri != null) {
-            exportMessage = runCatching { writeReadingsCsv(context, uri, exportRows, tanks, exportLabel); "Excel-compatible CSV saved." }
+            exportMessage = runCatching { writeReadingsXlsx(context, uri, exportRows, tanks, exportLabel); "Excel workbook saved." }
                 .getOrElse { "Could not save CSV: ${it.message ?: "Unknown error"}" }
         }
     }
@@ -485,7 +487,7 @@ private fun TankCalculatorScreen() {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text("Export ${exportRows.size} reading(s) from the current view.")
                     Text("Choose a file format:")
-                    Text("• Excel-compatible CSV – opens in Microsoft Excel and other spreadsheet apps.")
+                    Text("• Excel (.xlsx) – an editable spreadsheet workbook.")
                     Text("• PDF – formatted report for viewing and sharing.")
                 }
             },
@@ -493,8 +495,8 @@ private fun TankCalculatorScreen() {
                 Column {
                     TextButton(onClick = {
                         exportDialogOpen = false
-                        csvExportLauncher.launch("${safeFileName(exportLabel)}.csv")
-                    }) { Text("Excel (CSV)") }
+                        csvExportLauncher.launch("${safeFileName(exportLabel)}.xlsx")
+                    }) { Text("Excel (.xlsx)") }
                     TextButton(onClick = {
                         exportDialogOpen = false
                         pdfExportLauncher.launch("${safeFileName(exportLabel)}.pdf")
@@ -607,6 +609,79 @@ private fun recordContentFor(record: TankRecord, tanks: List<TankInfo>): String 
     record.content.ifBlank { tankInfoFor(record.tank, tanks)?.content ?: "" }
 
 private fun csvCell(value: String): String = "\"" + value.replace("\"", "\"\"") + "\""
+
+
+private fun xmlEscape(value: String): String = value
+    .replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+    .replace("\"", "&quot;").replace("'", "&apos;")
+
+private fun excelColumn(index: Int): String {
+    var n = index + 1
+    var result = ""
+    while (n > 0) {
+        val rem = (n - 1) % 26
+        result = ('A'.code + rem).toChar() + result
+        n = (n - 1) / 26
+    }
+    return result
+}
+
+private fun writeReadingsXlsx(
+    context: android.content.Context,
+    uri: Uri,
+    rows: List<DatedRecord>,
+    tanks: List<TankInfo>,
+    reportTitle: String
+) {
+    val sheetRows = mutableListOf<List<String>>()
+    sheetRows.add(listOf(reportTitle))
+    sheetRows.add(listOf("Date", "Tank", "Content", "Total capacity (m³)", "Maximum sounding (cm)", "Density (kg/m³)", "Measurement", "Measurement type", "Trim (m)", "Corrected volume (m³)"))
+    rows.forEach { item ->
+        val info = tankInfoFor(item.record.tank, tanks)
+        sheetRows.add(listOf(
+            item.date, item.record.tank, recordContentFor(item.record, tanks),
+            info?.totalCapacity ?: "", info?.maxSounding ?: "", info?.density ?: "",
+            item.record.measurement, item.record.kind, item.record.trim, item.record.volume
+        ))
+    }
+    if (rows.isNotEmpty()) {
+        sheetRows.add(emptyList())
+        sheetRows.add(listOf("Total corrected volume (m³)", rows.sumOf { it.record.volume.toDoubleOrNull() ?: 0.0 }.fmt()))
+    }
+    val sheetXml = buildString {
+        append("""<?xml version="1.0" encoding="UTF-8" standalone="yes"?>""")
+        append("""<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData>""")
+        sheetRows.forEachIndexed { rowIndex, cells ->
+            append("""<row r="${rowIndex + 1}">""")
+            cells.forEachIndexed { colIndex, value ->
+                if (value.isNotEmpty()) {
+                    val ref = excelColumn(colIndex) + (rowIndex + 1)
+                    append("""<c r="$ref" t="inlineStr"><is><t xml:space="preserve">${xmlEscape(value)}</t></is></c>""")
+                }
+            }
+            append("</row>")
+        }
+        append("</sheetData></worksheet>")
+    }
+    val workbookXml = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="Tank Readings" sheetId="1" r:id="rId1"/></sheets></workbook>"""
+    val workbookRels = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/></Relationships>"""
+    val rootRels = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>"""
+    val contentTypes = """<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/></Types>"""
+    context.contentResolver.openOutputStream(uri)?.use { output ->
+        ZipOutputStream(output).use { zip ->
+            fun entry(name: String, content: String) {
+                zip.putNextEntry(ZipEntry(name))
+                zip.write(content.toByteArray(Charsets.UTF_8))
+                zip.closeEntry()
+            }
+            entry("[Content_Types].xml", contentTypes)
+            entry("_rels/.rels", rootRels)
+            entry("xl/workbook.xml", workbookXml)
+            entry("xl/_rels/workbook.xml.rels", workbookRels)
+            entry("xl/worksheets/sheet1.xml", sheetXml)
+        }
+    } ?: error("Unable to open the selected file.")
+}
 
 private fun writeReadingsCsv(
     context: android.content.Context,
