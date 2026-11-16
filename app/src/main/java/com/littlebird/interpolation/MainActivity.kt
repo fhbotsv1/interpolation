@@ -95,7 +95,7 @@ private fun TankCalculatorScreen() {
     var customIntervalError by remember { mutableStateOf<String?>(null) }
     var volumePrecision by remember { mutableIntStateOf(calculatorSettings.getInt("volume_precision", 3).coerceIn(0, 4)) }
     var precisionMenuExpanded by remember { mutableStateOf(false) }
-    var trim by remember { mutableStateOf("0.15") }
+    var trim by remember { mutableStateOf("0.0") }
     var t1 by remember { mutableStateOf("0.1") }
     var t2 by remember { mutableStateOf("0.2") }
     var a by remember { mutableStateOf("") }
