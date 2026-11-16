@@ -425,7 +425,7 @@ private fun TankCalculatorScreen() {
                             .distinctBy { it.lowercase(Locale.getDefault()) }
                             .sortedBy { it.lowercase(Locale.getDefault()) }
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("Select tanks (\${selectedContentTanks.size} selected)", fontWeight = FontWeight.SemiBold)
+                            Text("Select tanks (${selectedContentTanks.size} selected)", fontWeight = FontWeight.SemiBold)
                             Row {
                                 TextButton(onClick = { selectedContentTanks = selectableTankNames.toSet() }) { Text("All") }
                                 TextButton(onClick = { selectedContentTanks = emptySet() }) { Text("Clear") }
@@ -537,9 +537,9 @@ private fun TankCalculatorScreen() {
                                 Card(Modifier.fillMaxWidth()) {
                                     Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                                         Text(contentName, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
-                                        OutputLine("Current volume ($contentRangeEnd)", "\${currentVolume.fmt()} m³")
-                                        OutputLine("Total generated / change", "\${if (generatedVolume > 0) "+" else ""}\${generatedVolume.fmt()} m³")
-                                        Text("Compared across \${comparable.size} tank(s) with readings on both dates; \${endRows.size} tank(s) have end-date readings.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        OutputLine("Current volume ($contentRangeEnd)", "${currentVolume.fmt()} m³")
+                                        OutputLine("Total generated / change", "${if (generatedVolume > 0) "+" else ""}${generatedVolume.fmt()} m³")
+                                        Text("Compared across ${comparable.size} tank(s) with readings on both dates; ${endRows.size} tank(s) have end-date readings.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     }
                                 }
                             }
