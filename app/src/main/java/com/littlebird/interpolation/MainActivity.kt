@@ -123,6 +123,7 @@ private fun TankCalculatorScreen() {
     var exportLabel by remember { mutableStateOf("Tank readings") }
     var exportIncludeTotal by remember { mutableStateOf(true) }
     var exportMessage by remember { mutableStateOf<String?>(null) }
+    var deleteRecordsConfirmStage by remember { mutableStateOf(0) }
 
     val csvExportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")) { uri: Uri? ->
         if (uri != null) {
@@ -378,6 +379,15 @@ private fun TankCalculatorScreen() {
             }
             else -> {
                 Panel("Saved tank readings") {
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                        TextButton(
+                            onClick = { deleteRecordsConfirmStage = 1 },
+                            enabled = allRecords.isNotEmpty(),
+                            colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                        ) {
+                            Text("Delete all records")
+                        }
+                    }
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             FilterChip(selected = recordMode == "Date", onClick = { recordMode = "Date" }, label = { Text("By date") })
@@ -548,6 +558,51 @@ private fun TankCalculatorScreen() {
                 }
             }
         }
+    }
+
+    if (deleteRecordsConfirmStage == 1) {
+        AlertDialog(
+            onDismissRequest = { deleteRecordsConfirmStage = 0 },
+            title = { Text("Delete all saved records?") },
+            text = {
+                Text("This will permanently delete all ${allRecords.size} saved tank reading(s) across every date. Tank names and tank particulars will not be deleted. This action cannot be undone.")
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = { deleteRecordsConfirmStage = 2 },
+                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                ) { Text("Continue") }
+            },
+            dismissButton = {
+                TextButton(onClick = { deleteRecordsConfirmStage = 0 }) { Text("Cancel") }
+            }
+        )
+    }
+
+    if (deleteRecordsConfirmStage == 2) {
+        AlertDialog(
+            onDismissRequest = { deleteRecordsConfirmStage = 0 },
+            title = { Text("Final confirmation") },
+            text = {
+                Text("Are you absolutely sure? All saved readings will be erased permanently. Press DELETE ALL RECORDS to confirm.")
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        context.getSharedPreferences("tank_readings", android.content.Context.MODE_PRIVATE)
+                            .edit().clear().commit()
+                        refreshRecords()
+                        deleteRecordsConfirmStage = 0
+                        exportMessage = null
+                        notice = "All saved tank readings have been deleted. Tank details are unchanged."
+                    },
+                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                ) { Text("DELETE ALL RECORDS") }
+            },
+            dismissButton = {
+                TextButton(onClick = { deleteRecordsConfirmStage = 0 }) { Text("Cancel") }
+            }
+        )
     }
 
     if (exportDialogOpen) {
