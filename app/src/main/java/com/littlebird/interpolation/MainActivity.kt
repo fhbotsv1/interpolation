@@ -37,9 +37,9 @@ class MainActivity : ComponentActivity() {
     }
 }
 
-private data class Calc(val atTrimLow: Double, val atTrimHigh: Double, val trimVolume: Double, val heelCorrection: Double, val finalVolume: Double)
-private data class TankInfo(val name: String, val totalCapacity: String, val content: String, val maxSounding: String, val density: String)
-private data class TankRecord(val tank: String, val measurement: String, val kind: String, val trim: String, val volume: String, val content: String = "")
+private data class Calc(val atTrimLow: Double, val atTrimHigh: Double, val trimVolume: Double, val heelCorrection: Double, val finalVolume: Double, val linearMass: Double? = null, val astmMass: Double? = null, val astmVcf: Double? = null, val temperature: Double? = null, val density15: Double? = null)
+private data class TankInfo(val name: String, val totalCapacity: String, val content: String, val maxSounding: String, val density: String, val density15: String = "")
+private data class TankRecord(val tank: String, val measurement: String, val kind: String, val trim: String, val volume: String, val content: String = "", val temperature: String = "", val density15: String = "", val linearMass: String = "", val astmMass: String = "", val astmVcf: String = "")
 private data class DatedRecord(val date: String, val record: TankRecord)
 
 private fun lerp(x: Double, x1: Double, x2: Double, y1: Double, y2: Double): Double {
@@ -73,6 +73,9 @@ private fun runCalc(level: Double, l1: Double, l2: Double, trim: Double, t1: Dou
 private fun TankCalculatorScreen() {
     val context = androidx.compose.ui.platform.LocalContext.current
     var page by remember { mutableStateOf("Calculator") }
+    var isBunker by remember { mutableStateOf(false) }
+    val tankPrefsName = if (isBunker) "bunker_tank_list" else "tank_list"
+    val recordPrefsName = if (isBunker) "bunker_tank_readings" else "tank_readings"
     var tanks by remember { mutableStateOf(loadTankInfos(context)) }
     var tankName by remember { mutableStateOf("") }
     var tankMenuExpanded by remember { mutableStateOf(false) }
@@ -82,6 +85,8 @@ private fun TankCalculatorScreen() {
     var tankContentDraft by remember { mutableStateOf("") }
     var tankMaxSoundingDraft by remember { mutableStateOf("") }
     var tankDensityDraft by remember { mutableStateOf("") }
+    var tankDensity15Draft by remember { mutableStateOf("") }
+    var bunkerTemperature by remember { mutableStateOf("15") }
     var tankDialogError by remember { mutableStateOf<String?>(null) }
 
     var kind by remember { mutableStateOf("Sounding") }
@@ -153,8 +158,8 @@ private fun TankCalculatorScreen() {
             .apply()
     }
 
-    fun refreshTanks() { tanks = loadTankInfos(context) }
-    fun refreshRecords() { allRecords = loadAllRecords(context) }
+    fun refreshTanks() { tanks = loadTankInfos(context, tankPrefsName) }
+    fun refreshRecords() { allRecords = loadAllRecords(context, recordPrefsName) }
     fun chooseDate() {
         val parsed = parseDate(selectedDate)
         DatePickerDialog(context, { _, year, month, day ->
@@ -181,6 +186,10 @@ private fun TankCalculatorScreen() {
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(18.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("Tank Volume Calculator", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+            SegmentedButton(selected = !isBunker, onClick = { if (isBunker) { isBunker = false; tanks = loadTankInfos(context, "tank_list"); allRecords = loadAllRecords(context, "tank_readings"); result = null; notice = null } }, shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2)) { Text("Engine Room") }
+            SegmentedButton(selected = isBunker, onClick = { if (!isBunker) { isBunker = true; tanks = loadTankInfos(context, "bunker_tank_list"); allRecords = loadAllRecords(context, "bunker_tank_readings"); result = null; notice = null } }, shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2)) { Text("Bunker") }
+        }
         Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 FilterChip(
@@ -312,6 +321,13 @@ private fun TankCalculatorScreen() {
                         }
                     } else Text("Zero trim: trim reference values are not required.", style = MaterialTheme.typography.bodySmall)
                 }
+                if (isBunker) {
+                    Panel("Bunker temperature and density") {
+                        Field("Current tank temperature (°C)", bunkerTemperature, { bunkerTemperature = it; result = null })
+                        val selectedTankDensity = tanks.firstOrNull { it.name.equals(tankName.trim(), true) }?.density15.orEmpty()
+                        Text("Tank density at 15°C: ${selectedTankDensity.ifBlank { "Not entered — update tank particulars" }} kg/m³", style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
                 Panel("3. Tank table volumes (m³)") {
                     if (actualTrimIsZero) {
                         Text("Enter tank-table volume(s) at zero trim.", style = MaterialTheme.typography.bodySmall)
@@ -381,9 +397,23 @@ private fun TankCalculatorScreen() {
                         } else if (atUpper) b.num() else 0.0
                         val volumeC = if (zeroTrim || atUpper) 0.0 else c.num()
                         val volumeD = if (zeroTrim || atLower) 0.0 else d.num()
-                        result = runCalc(actualLevelValue, lowerRef, upperRef, actualTrimValue,
+                        val baseResult = runCalc(actualLevelValue, lowerRef, upperRef, actualTrimValue,
                             if (zeroTrim) 0.0 else t1.num(), if (zeroTrim) 1.0 else t2.num(),
                             volumeA, volumeB, volumeC, volumeD, heel.num(), h1.num(), h2.num(), hc1.num(), hc2.num())
+                        result = if (isBunker) {
+                            val density15 = tanks.firstOrNull { it.name.equals(tankName.trim(), true) }?.density15?.toDoubleOrNull()
+                                ?: error("Enter the tank density at 15°C in the Tanks section.")
+                            require(density15 in 839.0..1075.0) { "The selected API/ASTM Table 54B fuel-oil correlation applies to density 839–1075 kg/m³ at 15°C. Check the density or product category." }
+                            val temp = bunkerTemperature.num()
+                            require(temp in -50.0..150.0) { "Temperature must be between -50°C and 150°C for this calculation." }
+                            val dt = temp - 15.0
+                            val alpha = 186.9696 / (density15 * density15) + 0.4862 / density15
+                            val vcf = kotlin.math.exp(-alpha * dt * (1.0 + 0.8 * alpha * dt))
+                            val linearDensity = density15 * (1.0 - 0.00064 * dt)
+                            baseResult.copy(linearMass = baseResult.finalVolume * linearDensity / 1000.0,
+                                astmMass = baseResult.finalVolume * vcf * density15 / 1000.0,
+                                astmVcf = vcf, temperature = temp, density15 = density15)
+                        } else baseResult
                         error = null; notice = null
                     } catch (e: Exception) {
                         result = null; error = e.message ?: "Check the entered values."
@@ -401,18 +431,31 @@ private fun TankCalculatorScreen() {
                             OutputLine("Volume after trim interpolation", r.trimVolume.fmt(volumePrecision) + " m³")
                             OutputLine("Heel correction", r.heelCorrection.fmt(volumePrecision) + " m³")
                             OutputLine("Final volume", r.finalVolume.fmt(volumePrecision) + " m³", true)
+                            if (isBunker) {
+                                HorizontalDivider()
+                                Text("Bunker mass calculation", fontWeight = FontWeight.Bold)
+                                OutputLine("Current temperature", "${r.temperature?.fmt(2)} °C")
+                                OutputLine("Density at 15°C", "${r.density15?.fmt(2)} kg/m³")
+                                OutputLine("Linear coefficient mass", "${r.linearMass?.fmt(3)} MT", true)
+                                OutputLine("API/ASTM Table 54B VCF", r.astmVcf?.fmt(6) ?: "—")
+                                OutputLine("API/ASTM fuel-oil mass", "${r.astmMass?.fmt(3)} MT", true)
+                                OutputLine("Mass difference", "${((r.linearMass ?: 0.0) - (r.astmMass ?: 0.0)).fmt(3)} MT")
+                                Text("API/ASTM Table 54B generalized fuel-oil correlation; temperature correction only, atmospheric pressure assumed. Verify against approved onboard tables and cargo documentation.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
                         }
                     }
                     Button(onClick = {
                         val tankInfo = tanks.firstOrNull { it.name.equals(tankName.trim(), true) }
-                        val rec = TankRecord(tankName.trim(), level.trim(), kind, trim.trim(), r.finalVolume.fmt(volumePrecision), tankInfo?.content ?: "")
+                        val rec = TankRecord(tankName.trim(), level.trim(), kind, trim.trim(), r.finalVolume.fmt(volumePrecision), tankInfo?.content ?: "",
+                            if (isBunker) r.temperature?.fmt(2).orEmpty() else "", if (isBunker) r.density15?.fmt(2).orEmpty() else "",
+                            if (isBunker) r.linearMass?.fmt(3).orEmpty() else "", if (isBunker) r.astmMass?.fmt(3).orEmpty() else "", if (isBunker) r.astmVcf?.fmt(6).orEmpty() else "")
                         val day = if (page == "Missed entry") entryDate else todayKey()
-                        val existing = findTankRecord(context, day, rec.tank)
+                        val existing = findTankRecord(context, day, rec.tank, recordPrefsName)
                         if (existing != null) {
                             duplicateRecord = rec
                             duplicateDate = day
                         } else {
-                            saveRecord(context, day, rec)
+                            saveRecord(context, day, rec, recordPrefsName)
                             selectedDate = day
                             refreshRecords()
                             notice = "Reading for ${rec.tank} saved under $day."
@@ -424,16 +467,16 @@ private fun TankCalculatorScreen() {
             }
             "Tanks" -> {
                 Panel("Manage tanks") {
-                    Text("Maintain the tank particulars used by the calculator and content-wise reports.")
-                    Button(onClick = { tankDialogMode = "Add"; tankDraft = ""; tankCapacityDraft = ""; tankContentDraft = ""; tankMaxSoundingDraft = ""; tankDensityDraft = ""; tankDialogError = null }, modifier = Modifier.fillMaxWidth()) { Text("Add tank") }
+                    Text(if (isBunker) "Maintain bunker tank particulars, including density at the 15°C reference temperature." else "Maintain the tank particulars used by the calculator and content-wise reports.")
+                    Button(onClick = { tankDialogMode = "Add"; tankDraft = ""; tankCapacityDraft = ""; tankContentDraft = ""; tankMaxSoundingDraft = ""; tankDensityDraft = ""; tankDensity15Draft = ""; tankDialogError = null }, modifier = Modifier.fillMaxWidth()) { Text("Add tank") }
                     if (tanks.isEmpty()) Text("No tanks have been added.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     tanks.sortedBy { it.name.lowercase(Locale.getDefault()) }.forEach { info ->
                         Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                             Text(info.name, fontWeight = FontWeight.SemiBold)
                             Text("Capacity: ${info.totalCapacity.ifBlank { "—" }} m³  •  Content: ${info.content.ifBlank { "—" }}")
-                            Text("Max sounding: ${info.maxSounding.ifBlank { "—" }} cm  •  Density: ${info.density.ifBlank { "—" }}", style = MaterialTheme.typography.bodySmall)
+                            Text("Max sounding: ${info.maxSounding.ifBlank { "—" }} cm  •  Density: ${if (isBunker) info.density15.ifBlank { "—" } else info.density.ifBlank { "—" }} kg/m³", style = MaterialTheme.typography.bodySmall)
                             Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
-                                TextButton(onClick = { tankName = info.name; tankDraft = info.name; tankDraftOriginalName = info.name; tankCapacityDraft = info.totalCapacity; tankContentDraft = info.content; tankMaxSoundingDraft = info.maxSounding; tankDensityDraft = info.density; tankDialogMode = "Edit"; tankDialogError = null }) { Text("Edit") }
+                                TextButton(onClick = { tankName = info.name; tankDraft = info.name; tankDraftOriginalName = info.name; tankCapacityDraft = info.totalCapacity; tankContentDraft = info.content; tankMaxSoundingDraft = info.maxSounding; tankDensityDraft = info.density; tankDensity15Draft = info.density15; tankDialogMode = "Edit"; tankDialogError = null }) { Text("Edit") }
                                 TextButton(onClick = { tankDraft = info.name; tankDialogMode = "Delete"; tankDialogError = null }, colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error)) { Text("Delete") }
                             }
                         }
@@ -455,7 +498,7 @@ private fun TankCalculatorScreen() {
                     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             FilterChip(selected = recordMode == "Date", onClick = { recordMode = "Date" }, label = { Text("By date") })
-                            FilterChip(selected = recordMode == "Tank", onClick = { recordMode = "Tank" }, label = { Text("By tank") })
+                            if (!isBunker) FilterChip(selected = recordMode == "Tank", onClick = { recordMode = "Tank" }, label = { Text("By tank") })
                         }
                         Row {
                             FilterChip(selected = recordMode == "Content", onClick = {
@@ -471,7 +514,7 @@ private fun TankCalculatorScreen() {
                         OutlinedButton(onClick = { chooseDate() }, modifier = Modifier.fillMaxWidth()) {
                             Text("Date: $selectedDate  •  Change date")
                         }
-                    } else if (recordMode == "Tank") {
+                    } else if (recordMode == "Tank" && !isBunker) {
                         val recordTankOptions = (tanks.map { it.name } + allRecords.map { it.record.tank })
                             .distinctBy { it.lowercase(Locale.getDefault()) }
                             .sortedBy { it.lowercase(Locale.getDefault()) }
@@ -541,7 +584,7 @@ private fun TankCalculatorScreen() {
                                         val visibleRecords = when (recordMode) {
                         "Date" -> allRecords.filter { it.date == selectedDate }
                             .sortedBy { it.record.tank.lowercase(Locale.getDefault()) }
-                        "Tank" -> allRecords.filter { item ->
+                        "Tank" -> if (isBunker) emptyList() else allRecords.filter { item ->
                             item.record.tank.equals(recordTank, ignoreCase = true) &&
                                 item.date >= contentRangeStart && item.date <= contentRangeEnd
                         }.sortedByDescending { it.date }
@@ -551,7 +594,7 @@ private fun TankCalculatorScreen() {
                                 selectedContents.any { it.equals(contentName, ignoreCase = true) }
                         }.sortedWith(compareBy<DatedRecord> { it.date }.thenBy { it.record.tank.lowercase(Locale.getDefault()) })
                     }
-                    if ((recordMode == "Content" || recordMode == "Tank") && contentRangeStart > contentRangeEnd) {
+                    if ((recordMode == "Content" || (recordMode == "Tank" && !isBunker)) && contentRangeStart > contentRangeEnd) {
                         Text("The start date must be on or before the end date.", color = MaterialTheme.colorScheme.error)
                     } else if (recordMode == "Content" && selectedContents.isEmpty()) {
                         Text("Select at least one content to view its readings.", color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -587,6 +630,12 @@ private fun TankCalculatorScreen() {
                                 TableCell("Type", true, 92.dp)
                                 TableCell("Trim (m)", true, 82.dp)
                                 TableCell("Corrected m³", true, 112.dp)
+                                if (isBunker) {
+                                    TableCell("Temp °C", true, 85.dp)
+                                    TableCell("Density @15°C", true, 105.dp)
+                                    TableCell("Linear MT", true, 105.dp)
+                                    TableCell("ASTM MT", true, 105.dp)
+                                }
                             }
                             visibleRecords.forEach { item ->
                                 Row {
@@ -608,6 +657,12 @@ private fun TankCalculatorScreen() {
                                     TableCell(item.record.kind, false, 92.dp)
                                     TableCell(item.record.trim, false, 82.dp)
                                     TableCell(item.record.volume, false, 112.dp)
+                                    if (isBunker) {
+                                        TableCell(item.record.temperature + " °C", false, 85.dp)
+                                        TableCell(item.record.density15, false, 105.dp)
+                                        TableCell(item.record.linearMass + " MT", false, 105.dp)
+                                        TableCell(item.record.astmMass + " MT", false, 105.dp)
+                                    }
                                 }
                             }
                         }
@@ -749,7 +804,7 @@ private fun TankCalculatorScreen() {
     if (duplicateRecord != null && duplicateDate != null) {
         val proposed = duplicateRecord!!
         val day = duplicateDate!!
-        val original = findTankRecord(context, day, proposed.tank)
+        val original = findTankRecord(context, day, proposed.tank, recordPrefsName)
         AlertDialog(
             onDismissRequest = { duplicateRecord = null; duplicateDate = null },
             title = { Text("Reading already exists") },
@@ -763,7 +818,7 @@ private fun TankCalculatorScreen() {
             },
             confirmButton = {
                 TextButton(onClick = {
-                    saveRecord(context, day, proposed)
+                    saveRecord(context, day, proposed, recordPrefsName)
                     selectedDate = day
                     refreshRecords()
                     notice = "Reading for ${proposed.tank} on $day was overwritten."
@@ -837,7 +892,11 @@ private fun TankCalculatorScreen() {
                     OutlinedTextField(value = tankCapacityDraft, onValueChange = { tankCapacityDraft = it.filter { ch -> ch.isDigit() || ch == '.' } }, label = { Text("Total capacity (m³)") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
                     OutlinedTextField(value = tankContentDraft, onValueChange = { tankContentDraft = it }, label = { Text("Content") }, singleLine = true)
                     OutlinedTextField(value = tankMaxSoundingDraft, onValueChange = { tankMaxSoundingDraft = it.filter { ch -> ch.isDigit() || ch == '.' } }, label = { Text("Maximum sounding (cm)") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
-                    OutlinedTextField(value = tankDensityDraft, onValueChange = { tankDensityDraft = it.filter { ch -> ch.isDigit() || ch == '.' } }, label = { Text("Content density (kg/m³)") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
+                    if (isBunker) {
+                        OutlinedTextField(value = tankDensity15Draft, onValueChange = { tankDensity15Draft = it.filter { ch -> ch.isDigit() || ch == '.' } }, label = { Text("Density at 15°C (kg/m³)") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
+                    } else {
+                        OutlinedTextField(value = tankDensityDraft, onValueChange = { tankDensityDraft = it.filter { ch -> ch.isDigit() || ch == '.' } }, label = { Text("Content density (kg/m³)") }, singleLine = true, keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Decimal))
+                    }
                     tankDialogError?.let { Text(it, color = MaterialTheme.colorScheme.error) }
                 }
             },
@@ -845,7 +904,7 @@ private fun TankCalculatorScreen() {
                 TextButton(onClick = {
                     when (mode) {
                         "Delete" -> {
-                            saveTankInfos(context, tanks.filterNot { it.name.equals(tankDraft, true) })
+                            saveTankInfos(context, tanks.filterNot { it.name.equals(tankDraft, true) }, tankPrefsName)
                             if (tankName.equals(tankDraft, true)) tankName = ""
                             refreshTanks(); tankDialogMode = null
                         }
@@ -858,13 +917,14 @@ private fun TankCalculatorScreen() {
                                 tankCapacityDraft.toDoubleOrNull() == null || tankCapacityDraft.toDouble() <= 0.0 -> tankDialogError = "Enter a valid total capacity."
                                 tankContentDraft.trim().isEmpty() -> tankDialogError = "Enter the tank content."
                                 tankMaxSoundingDraft.toDoubleOrNull() == null || tankMaxSoundingDraft.toDouble() <= 0.0 -> tankDialogError = "Enter a valid maximum sounding."
-                                tankDensityDraft.toDoubleOrNull() == null || tankDensityDraft.toDouble() <= 0.0 -> tankDialogError = "Enter a valid content density."
+                                !isBunker && (tankDensityDraft.toDoubleOrNull() == null || tankDensityDraft.toDouble() <= 0.0) -> tankDialogError = "Enter a valid content density."
+                                isBunker && (tankDensity15Draft.toDoubleOrNull() == null || tankDensity15Draft.toDouble() <= 0.0) -> tankDialogError = "Enter a valid density at 15°C."
                                 else -> {
-                                    val info = TankInfo(name, tankCapacityDraft.trim(), tankContentDraft.trim(), tankMaxSoundingDraft.trim(), tankDensityDraft.trim())
+                                    val info = TankInfo(name, tankCapacityDraft.trim(), tankContentDraft.trim(), tankMaxSoundingDraft.trim(), tankDensityDraft.trim(), if (isBunker) tankDensity15Draft.trim() else "")
                                     val updated = if (mode == "Add") tanks + info else tanks.map { if (it.name.equals(tankDraftOriginalName, true)) info else it }
-                                    saveTankInfos(context, updated)
+                                    saveTankInfos(context, updated, tankPrefsName)
                                     if (mode == "Edit" && !name.equals(tankDraftOriginalName, true)) {
-                                        renameTankInRecords(context, tankDraftOriginalName, name)
+                                        renameTankInRecords(context, tankDraftOriginalName, name, recordPrefsName)
                                         if (tankName.equals(tankDraftOriginalName, true)) tankName = name
                                     } else if (mode == "Add") tankName = name
                                     refreshTanks(); refreshRecords(); tankDialogMode = null
@@ -1085,46 +1145,46 @@ private fun loadReferenceIntervals(context: android.content.Context): List<Int> 
         .distinct().sorted().take(4)
 }
 
-private fun loadTankInfos(context: android.content.Context): List<TankInfo> {
-    val raw = context.getSharedPreferences("tank_list", android.content.Context.MODE_PRIVATE).getString("tanks", "[]") ?: "[]"
+private fun loadTankInfos(context: android.content.Context, prefsName: String = "tank_list"): List<TankInfo> {
+    val raw = context.getSharedPreferences(prefsName, android.content.Context.MODE_PRIVATE).getString("tanks", "[]") ?: "[]"
     return runCatching {
         val a = JSONArray(raw)
         (0 until a.length()).mapNotNull { i ->
             when (val item = a.get(i)) {
                 is String -> TankInfo(item, "", "", "", "")
-                is JSONObject -> TankInfo(item.optString("name"), item.optString("totalCapacity"), item.optString("content"), item.optString("maxSounding"), item.optString("density"))
+                is JSONObject -> TankInfo(item.optString("name"), item.optString("totalCapacity"), item.optString("content"), item.optString("maxSounding"), item.optString("density"), item.optString("density15"))
                 else -> null
             }
         }
     }.getOrDefault(emptyList())
 }
-private fun saveTankInfos(context: android.content.Context, tanks: List<TankInfo>) {
+private fun saveTankInfos(context: android.content.Context, tanks: List<TankInfo>, prefsName: String = "tank_list") {
     val array = JSONArray()
     tanks.distinctBy { it.name.lowercase(Locale.getDefault()) }.forEach { info ->
-        array.put(JSONObject().put("name", info.name).put("totalCapacity", info.totalCapacity).put("content", info.content).put("maxSounding", info.maxSounding).put("density", info.density))
+        array.put(JSONObject().put("name", info.name).put("totalCapacity", info.totalCapacity).put("content", info.content).put("maxSounding", info.maxSounding).put("density", info.density).put("density15", info.density15))
     }
-    context.getSharedPreferences("tank_list", android.content.Context.MODE_PRIVATE).edit().putString("tanks", array.toString()).apply()
+    context.getSharedPreferences(prefsName, android.content.Context.MODE_PRIVATE).edit().putString("tanks", array.toString()).apply()
 }
-private fun loadRecords(context: android.content.Context, date: String): List<TankRecord> {
-    val raw = context.getSharedPreferences("tank_readings", android.content.Context.MODE_PRIVATE).getString(date, "[]") ?: "[]"
+private fun loadRecords(context: android.content.Context, date: String, prefsName: String = "tank_readings"): List<TankRecord> {
+    val raw = context.getSharedPreferences(prefsName, android.content.Context.MODE_PRIVATE).getString(date, "[]") ?: "[]"
     return parseRecords(raw)
 }
 private fun parseRecords(raw: String): List<TankRecord> = runCatching {
     val array = JSONArray(raw)
     (0 until array.length()).map { i ->
         val o = array.getJSONObject(i)
-        TankRecord(o.optString("tank"), o.optString("measurement"), o.optString("kind"), o.optString("trim"), o.optString("volume"), o.optString("content"))
+        TankRecord(o.optString("tank"), o.optString("measurement"), o.optString("kind"), o.optString("trim"), o.optString("volume"), o.optString("content"), o.optString("temperature"), o.optString("density15"), o.optString("linearMass"), o.optString("astmMass"), o.optString("astmVcf"))
     }
 }.getOrDefault(emptyList())
-private fun loadAllRecords(context: android.content.Context): List<DatedRecord> {
-    val prefs = context.getSharedPreferences("tank_readings", android.content.Context.MODE_PRIVATE)
+private fun loadAllRecords(context: android.content.Context, prefsName: String = "tank_readings"): List<DatedRecord> {
+    val prefs = context.getSharedPreferences(prefsName, android.content.Context.MODE_PRIVATE)
     return prefs.all.mapNotNull { (date, value) ->
         val raw = value as? String ?: return@mapNotNull null
         parseRecords(raw).map { DatedRecord(date, it) }
     }.flatten()
 }
-private fun renameTankInRecords(context: android.content.Context, oldName: String, newName: String) {
-    val prefs = context.getSharedPreferences("tank_readings", android.content.Context.MODE_PRIVATE)
+private fun renameTankInRecords(context: android.content.Context, oldName: String, newName: String, prefsName: String = "tank_readings") {
+    val prefs = context.getSharedPreferences(prefsName, android.content.Context.MODE_PRIVATE)
     val editor = prefs.edit()
     prefs.all.forEach { (date, value) ->
         val raw = value as? String ?: return@forEach
@@ -1134,17 +1194,18 @@ private fun renameTankInRecords(context: android.content.Context, oldName: Strin
         val array = JSONArray()
         updated.forEach { rec ->
             array.put(JSONObject().put("tank", rec.tank).put("measurement", rec.measurement)
-                .put("kind", rec.kind).put("trim", rec.trim).put("volume", rec.volume).put("content", rec.content))
+                .put("kind", rec.kind).put("trim", rec.trim).put("volume", rec.volume).put("content", rec.content)
+                .put("temperature", rec.temperature).put("density15", rec.density15).put("linearMass", rec.linearMass).put("astmMass", rec.astmMass).put("astmVcf", rec.astmVcf))
         }
         editor.putString(date, array.toString())
     }
     editor.apply()
 }
-private fun findTankRecord(context: android.content.Context, date: String, tank: String): TankRecord? =
-    loadRecords(context, date).firstOrNull { it.tank.equals(tank, ignoreCase = true) }
+private fun findTankRecord(context: android.content.Context, date: String, tank: String, prefsName: String = "tank_readings"): TankRecord? =
+    loadRecords(context, date, prefsName).firstOrNull { it.tank.equals(tank, ignoreCase = true) }
 
-private fun saveRecord(context: android.content.Context, date: String, record: TankRecord) {
-    val prefs = context.getSharedPreferences("tank_readings", android.content.Context.MODE_PRIVATE)
+private fun saveRecord(context: android.content.Context, date: String, record: TankRecord, prefsName: String = "tank_readings") {
+    val prefs = context.getSharedPreferences(prefsName, android.content.Context.MODE_PRIVATE)
     val existing = runCatching { JSONArray(prefs.getString(date, "[]")) }.getOrDefault(JSONArray())
     val array = JSONArray()
     for (i in 0 until existing.length()) {
@@ -1152,7 +1213,8 @@ private fun saveRecord(context: android.content.Context, date: String, record: T
         if (!item.optString("tank").equals(record.tank, ignoreCase = true)) array.put(item)
     }
     array.put(JSONObject().put("tank", record.tank).put("measurement", record.measurement)
-        .put("kind", record.kind).put("trim", record.trim).put("volume", record.volume).put("content", record.content))
+        .put("kind", record.kind).put("trim", record.trim).put("volume", record.volume).put("content", record.content)
+        .put("temperature", record.temperature).put("density15", record.density15).put("linearMass", record.linearMass).put("astmMass", record.astmMass).put("astmVcf", record.astmVcf))
     prefs.edit().putString(date, array.toString()).apply()
 }
 
