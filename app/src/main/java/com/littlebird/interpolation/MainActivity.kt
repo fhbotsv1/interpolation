@@ -86,8 +86,11 @@ private fun TankCalculatorScreen() {
 
     var kind by remember { mutableStateOf("Sounding") }
     var level by remember { mutableStateOf("510") }
-    var l1 by remember { mutableStateOf("500") }
-    var l2 by remember { mutableStateOf("550") }
+    val calculatorSettings = remember { context.getSharedPreferences("calculator_settings", android.content.Context.MODE_PRIVATE) }
+    var referenceIntervalCm by remember { mutableIntStateOf(calculatorSettings.getInt("reference_interval_cm", 50).takeIf { it in listOf(10, 25, 50) } ?: 50) }
+    var volumePrecision by remember { mutableIntStateOf(calculatorSettings.getInt("volume_precision", 3).coerceIn(0, 4)) }
+    var intervalMenuExpanded by remember { mutableStateOf(false) }
+    var precisionMenuExpanded by remember { mutableStateOf(false) }
     var trim by remember { mutableStateOf("0.15") }
     var t1 by remember { mutableStateOf("0.1") }
     var t2 by remember { mutableStateOf("0.2") }
@@ -136,6 +139,13 @@ private fun TankCalculatorScreen() {
             exportMessage = runCatching { writeReadingsPdf(context, uri, exportRows, tanks, exportLabel, exportIncludeTotal); "PDF report saved." }
                 .getOrElse { "Could not save PDF: ${it.message ?: "Unknown error"}" }
         }
+    }
+
+    LaunchedEffect(referenceIntervalCm, volumePrecision) {
+        calculatorSettings.edit()
+            .putInt("reference_interval_cm", referenceIntervalCm)
+            .putInt("volume_precision", volumePrecision)
+            .apply()
     }
 
     fun refreshTanks() { tanks = loadTankInfos(context) }
@@ -229,15 +239,55 @@ private fun TankCalculatorScreen() {
                         FilterChip(selected = kind == "Ullage", onClick = { kind = "Ullage"; result = null }, label = { Text("Ullage") })
                     }
                     Field("Actual " + kind + " (cm)", level, { level = it; result = null })
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Field("Lower reference (cm)", l1, { l1 = it; result = null }, Modifier.weight(1f))
-                        Field("Upper reference (cm)", l2, { l2 = it; result = null }, Modifier.weight(1f))
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Box(Modifier.weight(1f)) {
+                            OutlinedButton(onClick = { intervalMenuExpanded = true }, modifier = Modifier.fillMaxWidth()) {
+                                Text("Interval: $referenceIntervalCm cm")
+                            }
+                            DropdownMenu(expanded = intervalMenuExpanded, onDismissRequest = { intervalMenuExpanded = false }) {
+                                listOf(10, 25, 50).forEach { option ->
+                                    DropdownMenuItem(text = { Text("$option cm") }, onClick = {
+                                        referenceIntervalCm = option
+                                        intervalMenuExpanded = false
+                                        result = null
+                                    })
+                                }
+                            }
+                        }
+                        Box(Modifier.weight(1f)) {
+                            OutlinedButton(onClick = { precisionMenuExpanded = true }, modifier = Modifier.fillMaxWidth()) {
+                                Text("Decimals: $volumePrecision")
+                            }
+                            DropdownMenu(expanded = precisionMenuExpanded, onDismissRequest = { precisionMenuExpanded = false }) {
+                                (0..4).forEach { option ->
+                                    DropdownMenuItem(text = { Text("$option decimal places") }, onClick = {
+                                        volumePrecision = option
+                                        precisionMenuExpanded = false
+                                        result = null
+                                    })
+                                }
+                            }
+                        }
                     }
+                    val actualLevelForRefs = level.toDoubleOrNull()
+                    val lowerRefValue = actualLevelForRefs?.let { kotlin.math.floor(it / referenceIntervalCm.toDouble()) * referenceIntervalCm }
+                    val upperRefValue = lowerRefValue?.plus(referenceIntervalCm)
+                    Text(
+                        if (lowerRefValue != null && upperRefValue != null)
+                            "Automatically selected references: $lowerRefValue cm – $upperRefValue cm"
+                        else "Enter a valid measurement to calculate reference values.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                 }
                 val actualTrimIsZero = trim.toDoubleOrNull() == 0.0
                 val actualLevel = level.toDoubleOrNull()
-                val lowerLevel = l1.toDoubleOrNull()
-                val upperLevel = l2.toDoubleOrNull()
+                val lowerLevel = actualLevel?.let { kotlin.math.floor(it / referenceIntervalCm.toDouble()) * referenceIntervalCm }
+                val upperLevel = lowerLevel?.plus(referenceIntervalCm)
+                val l1 = lowerLevel?.let { if (it % 1.0 == 0.0) it.toLong().toString() else it.toString() } ?: "0"
+                val l2 = upperLevel?.let { if (it % 1.0 == 0.0) it.toLong().toString() else it.toString() } ?: referenceIntervalCm.toString()
+                val levelAtLowerRef = actualLevel != null && lowerLevel != null && kotlin.math.abs(actualLevel - lowerLevel) < 0.0000001
+                val levelAtUpperRef = actualLevel != null && upperLevel != null && kotlin.math.abs(actualLevel - upperLevel) < 0.0000001
                 val levelAtLowerRef = actualLevel != null && lowerLevel != null && kotlin.math.abs(actualLevel - lowerLevel) < 0.0000001
                 val levelAtUpperRef = actualLevel != null && upperLevel != null && kotlin.math.abs(actualLevel - upperLevel) < 0.0000001
                 Panel("2. Trim references") {
@@ -305,8 +355,9 @@ private fun TankCalculatorScreen() {
                     try {
                         require(tankName.trim().isNotEmpty()) { "Select a tank in Tank details." }
                         val actualLevelValue = level.num()
-                        val lowerRef = l1.num()
-                        val upperRef = l2.num()
+                        require(actualLevelValue >= 0.0) { "Sounding/ullage must be zero or greater." }
+                        val lowerRef = kotlin.math.floor(actualLevelValue / referenceIntervalCm.toDouble()) * referenceIntervalCm
+                        val upperRef = lowerRef + referenceIntervalCm
                         val actualTrimValue = trim.num()
                         val atLower = kotlin.math.abs(actualLevelValue - lowerRef) < 0.0000001
                         val atUpper = kotlin.math.abs(actualLevelValue - upperRef) < 0.0000001
@@ -330,18 +381,18 @@ private fun TankCalculatorScreen() {
                     Card(Modifier.fillMaxWidth(), colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.primaryContainer)) {
                         Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                             Text("FINAL CORRECTED VOLUME", style = MaterialTheme.typography.labelLarge)
-                            Text(r.finalVolume.fmt() + " m³", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
+                            Text(r.finalVolume.fmt(volumePrecision) + " m³", style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold)
                             HorizontalDivider()
-                            OutputLine("Volume at lower trim", r.atTrimLow.fmt() + " m³")
-                            OutputLine("Volume at upper trim", r.atTrimHigh.fmt() + " m³")
-                            OutputLine("Volume after trim interpolation", r.trimVolume.fmt() + " m³")
-                            OutputLine("Heel correction", r.heelCorrection.fmt() + " m³")
-                            OutputLine("Final volume", r.finalVolume.fmt() + " m³", true)
+                            OutputLine("Volume at lower trim", r.atTrimLow.fmt(volumePrecision) + " m³")
+                            OutputLine("Volume at upper trim", r.atTrimHigh.fmt(volumePrecision) + " m³")
+                            OutputLine("Volume after trim interpolation", r.trimVolume.fmt(volumePrecision) + " m³")
+                            OutputLine("Heel correction", r.heelCorrection.fmt(volumePrecision) + " m³")
+                            OutputLine("Final volume", r.finalVolume.fmt(volumePrecision) + " m³", true)
                         }
                     }
                     Button(onClick = {
                         val tankInfo = tanks.firstOrNull { it.name.equals(tankName.trim(), true) }
-                        val rec = TankRecord(tankName.trim(), level.trim(), kind, trim.trim(), r.finalVolume.fmt(), tankInfo?.content ?: "")
+                        val rec = TankRecord(tankName.trim(), level.trim(), kind, trim.trim(), r.finalVolume.fmt(volumePrecision), tankInfo?.content ?: "")
                         val day = if (page == "Missed entry") entryDate else todayKey()
                         val existing = findTankRecord(context, day, rec.tank)
                         if (existing != null) {
@@ -1017,4 +1068,4 @@ private fun saveRecord(context: android.content.Context, date: String, record: T
     }
 }
 private fun String.num(): Double = trim().toDoubleOrNull() ?: error("Enter a valid number in every field.")
-private fun Double.fmt(): String = String.format(Locale.getDefault(), "%.3f", this)
+private fun Double.fmt(precision: Int = 3): String = String.format(Locale.getDefault(), "%." + precision.coerceIn(0, 6) + "f", this)
