@@ -564,7 +564,7 @@ private fun TankCalculatorScreen() {
                             exportIncludeTotal = recordMode == "Date"
                             exportLabel = when (recordMode) {
                                 "Date" -> "Tank readings $selectedDate"
-                                "Tank" -> "Tank readings $recordTank"
+                                "Tank" -> "Tank readings $recordTank $contentRangeStart to $contentRangeEnd"
                                 else -> "Content readings $contentRangeStart to $contentRangeEnd"
                             }
                             exportMessage = null
