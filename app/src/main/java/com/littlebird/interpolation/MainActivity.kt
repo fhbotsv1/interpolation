@@ -538,7 +538,20 @@ private fun TankCalculatorScreen() {
                             Text("Select at least one content.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
-                                        if ((recordMode == "Content" || recordMode == "Tank") && contentRangeStart > contentRangeEnd) {
+                                        val visibleRecords = when (recordMode) {
+                        "Date" -> allRecords.filter { it.date == selectedDate }
+                            .sortedBy { it.record.tank.lowercase(Locale.getDefault()) }
+                        "Tank" -> allRecords.filter { item ->
+                            item.record.tank.equals(recordTank, ignoreCase = true) &&
+                                item.date >= contentRangeStart && item.date <= contentRangeEnd
+                        }.sortedByDescending { it.date }
+                        else -> allRecords.filter { item ->
+                            val contentName = recordContentFor(item.record, tanks).ifBlank { "Unspecified content" }
+                            item.date >= contentRangeStart && item.date <= contentRangeEnd &&
+                                selectedContents.any { it.equals(contentName, ignoreCase = true) }
+                        }.sortedWith(compareBy<DatedRecord> { it.date }.thenBy { it.record.tank.lowercase(Locale.getDefault()) })
+                    }
+                    if ((recordMode == "Content" || recordMode == "Tank") && contentRangeStart > contentRangeEnd) {
                         Text("The start date must be on or before the end date.", color = MaterialTheme.colorScheme.error)
                     } else if (recordMode == "Content" && selectedContents.isEmpty()) {
                         Text("Select at least one content to view its readings.", color = MaterialTheme.colorScheme.onSurfaceVariant)
