@@ -384,7 +384,12 @@ private fun TankCalculatorScreen() {
                             FilterChip(selected = recordMode == "Tank", onClick = { recordMode = "Tank" }, label = { Text("By tank") })
                         }
                         Row {
-                            FilterChip(selected = recordMode == "Content", onClick = { recordMode = "Content" }, label = { Text("By content") })
+                            FilterChip(selected = recordMode == "Content", onClick = {
+                                recordMode = "Content"
+                                if (selectedContentTanks.isEmpty()) {
+                                    selectedContentTanks = (tanks.map { it.name } + allRecords.map { it.record.tank }).toSet()
+                                }
+                            }, label = { Text("By content") })
                         }
                     }
                     if (recordMode == "Date") {
@@ -462,7 +467,7 @@ private fun TankCalculatorScreen() {
                         Text("${visibleRecords.size} reading(s)", fontWeight = FontWeight.SemiBold)
                         OutlinedButton(onClick = {
                             exportRows = visibleRecords
-                            exportIncludeTotal = recordMode != "Tank"
+                            exportIncludeTotal = recordMode == "Date"
                             exportLabel = when (recordMode) {
                                 "Date" -> "Tank readings $selectedDate"
                                 "Tank" -> "Tank readings $recordTank"
