@@ -1,9 +1,15 @@
 package com.littlebird.interpolation
 
 import android.app.DatePickerDialog
+import android.graphics.Paint
+import android.graphics.Typeface
+import android.graphics.pdf.PdfDocument
+import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -107,6 +113,23 @@ private fun TankCalculatorScreen() {
     var recordContentMenuExpanded by remember { mutableStateOf(false) }
     var recordTankMenuExpanded by remember { mutableStateOf(false) }
     var allRecords by remember { mutableStateOf(loadAllRecords(context)) }
+    var exportDialogOpen by remember { mutableStateOf(false) }
+    var exportRows by remember { mutableStateOf<List<DatedRecord>>(emptyList()) }
+    var exportLabel by remember { mutableStateOf("Tank readings") }
+    var exportMessage by remember { mutableStateOf<String?>(null) }
+
+    val csvExportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("text/csv")) { uri: Uri? ->
+        if (uri != null) {
+            exportMessage = runCatching { writeReadingsCsv(context, uri, exportRows, tanks, exportLabel); "Excel-compatible CSV saved." }
+                .getOrElse { "Could not save CSV: ${it.message ?: "Unknown error"}" }
+        }
+    }
+    val pdfExportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")) { uri: Uri? ->
+        if (uri != null) {
+            exportMessage = runCatching { writeReadingsPdf(context, uri, exportRows, tanks, exportLabel); "PDF report saved." }
+                .getOrElse { "Could not save PDF: ${it.message ?: "Unknown error"}" }
+        }
+    }
 
     fun refreshTanks() { tanks = loadTankInfos(context) }
     fun refreshRecords() { allRecords = loadAllRecords(context) }
@@ -392,6 +415,19 @@ private fun TankCalculatorScreen() {
                         Text(when (recordMode) { "Date" -> "No readings saved for this date."; "Tank" -> "No readings found for this tank."; else -> "No tanks found for this content on this date." }, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     } else {
                         Text("${visibleRecords.size} reading(s)", fontWeight = FontWeight.SemiBold)
+                        OutlinedButton(onClick = {
+                            exportRows = visibleRecords
+                            exportLabel = when (recordMode) {
+                                "Date" -> "Tank readings $selectedDate"
+                                "Tank" -> "Tank readings $recordTank"
+                                else -> "$recordContent readings $selectedDate"
+                            }
+                            exportMessage = null
+                            exportDialogOpen = true
+                        }, modifier = Modifier.fillMaxWidth()) {
+                            Text("Download current view")
+                        }
+                        exportMessage?.let { Text(it, color = MaterialTheme.colorScheme.primary, style = MaterialTheme.typography.bodySmall) }
                         Column(Modifier.horizontalScroll(rememberScrollState())) {
                             Row {
                                 if (recordMode == "Tank") TableCell("Date", true, 105.dp)
@@ -439,6 +475,34 @@ private fun TankCalculatorScreen() {
                 }
             }
         }
+    }
+
+    if (exportDialogOpen) {
+        AlertDialog(
+            onDismissRequest = { exportDialogOpen = false },
+            title = { Text("Download current readings") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Text("Export ${exportRows.size} reading(s) from the current view.")
+                    Text("Choose a file format:")
+                    Text("• Excel-compatible CSV – opens in Microsoft Excel and other spreadsheet apps.")
+                    Text("• PDF – formatted report for viewing and sharing.")
+                }
+            },
+            confirmButton = {
+                Column {
+                    TextButton(onClick = {
+                        exportDialogOpen = false
+                        csvExportLauncher.launch("${safeFileName(exportLabel)}.csv")
+                    }) { Text("Excel (CSV)") }
+                    TextButton(onClick = {
+                        exportDialogOpen = false
+                        pdfExportLauncher.launch("${safeFileName(exportLabel)}.pdf")
+                    }) { Text("PDF") }
+                }
+            },
+            dismissButton = { TextButton(onClick = { exportDialogOpen = false }) { Text("Cancel") } }
+        )
     }
 
     if (duplicateRecord != null && duplicateDate != null) {
@@ -531,6 +595,118 @@ private fun TankCalculatorScreen() {
 }
 
 private var tankDraftOriginalName: String = ""
+
+
+private fun safeFileName(value: String): String =
+    value.replace(Regex("[^A-Za-z0-9._-]+"), "_").trim('_').ifBlank { "Tank_readings" }
+
+private fun tankInfoFor(tank: String, tanks: List<TankInfo>): TankInfo? =
+    tanks.firstOrNull { it.name.equals(tank, ignoreCase = true) }
+
+private fun recordContentFor(record: TankRecord, tanks: List<TankInfo>): String =
+    record.content.ifBlank { tankInfoFor(record.tank, tanks)?.content ?: "" }
+
+private fun csvCell(value: String): String = "\"" + value.replace("\"", "\"\"") + "\""
+
+private fun writeReadingsCsv(
+    context: android.content.Context,
+    uri: Uri,
+    rows: List<DatedRecord>,
+    tanks: List<TankInfo>,
+    reportTitle: String
+) {
+    val output = buildString {
+        append("\uFEFF")
+        appendLine(csvCell(reportTitle))
+        appendLine(listOf("Date", "Tank", "Content", "Total capacity (m³)", "Maximum sounding (cm)", "Density (kg/m³)", "Measurement", "Measurement type", "Trim (m)", "Corrected volume (m³)").joinToString(",") { csvCell(it) })
+        rows.forEach { item ->
+            val info = tankInfoFor(item.record.tank, tanks)
+            val values = listOf(
+                item.date, item.record.tank, recordContentFor(item.record, tanks),
+                info?.totalCapacity ?: "", info?.maxSounding ?: "", info?.density ?: "",
+                item.record.measurement, item.record.kind, item.record.trim, item.record.volume
+            )
+            appendLine(values.joinToString(",") { csvCell(it) })
+        }
+        if (rows.isNotEmpty()) {
+            appendLine()
+            appendLine(csvCell("Total corrected volume (m³)") + "," + csvCell(rows.sumOf { it.record.volume.toDoubleOrNull() ?: 0.0 }.fmt()))
+        }
+    }
+    context.contentResolver.openOutputStream(uri)?.use { it.write(output.toByteArray(Charsets.UTF_8)) }
+        ?: error("Unable to open the selected file.")
+}
+
+private fun writeReadingsPdf(
+    context: android.content.Context,
+    uri: Uri,
+    rows: List<DatedRecord>,
+    tanks: List<TankInfo>,
+    reportTitle: String
+) {
+    val document = PdfDocument()
+    val pageWidth = 842
+    val pageHeight = 595
+    val margin = 28f
+    val rowHeight = 28f
+    val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 18f; typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD) }
+    val headerPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 8.5f; typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD) }
+    val bodyPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 8.5f }
+    val mutedPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 9f }
+    val headers = listOf("Date", "Tank", "Content", "Capacity", "Max sound.", "Density", "Measured", "Type", "Trim", "Corrected m³")
+    val widths = listOf(65f, 72f, 75f, 65f, 65f, 60f, 62f, 55f, 48f, 75f)
+    val rowsPerPage = 15
+    val pageCount = maxOf(1, (rows.size + rowsPerPage - 1) / rowsPerPage)
+    for (pageIndex in 0 until pageCount) {
+        val page = document.startPage(PdfDocument.PageInfo.Builder(pageWidth, pageHeight, pageIndex + 1).create())
+        val canvas = page.canvas
+        var y = 38f
+        canvas.drawText(reportTitle, margin, y, titlePaint)
+        y += 18f
+        canvas.drawText("Generated: ${SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.getDefault()).format(Date())}    Readings: ${rows.size}", margin, y, mutedPaint)
+        y += 22f
+        var x = margin
+        headers.forEachIndexed { index, header ->
+            canvas.drawText(header, x, y, headerPaint)
+            x += widths[index]
+        }
+        y += 8f
+        canvas.drawLine(margin, y, pageWidth - margin, y, bodyPaint)
+        y += 15f
+        val start = pageIndex * rowsPerPage
+        val end = minOf(rows.size, start + rowsPerPage)
+        for (i in start until end) {
+            val item = rows[i]
+            val info = tankInfoFor(item.record.tank, tanks)
+            val values = listOf(
+                item.date, item.record.tank, recordContentFor(item.record, tanks),
+                info?.totalCapacity ?: "—", info?.maxSounding ?: "—", info?.density ?: "—",
+                item.record.measurement, item.record.kind, item.record.trim, item.record.volume
+            )
+            x = margin
+            values.forEachIndexed { index, value ->
+                val maxChars = (widths[index] / 5f).toInt().coerceAtLeast(5)
+                canvas.drawText(if (value.length > maxChars) value.take(maxChars - 1) + "…" else value, x, y, bodyPaint)
+                x += widths[index]
+            }
+            y += rowHeight
+            canvas.drawLine(margin, y - 12f, pageWidth - margin, y - 12f, mutedPaint)
+        }
+        if (pageIndex == pageCount - 1) {
+            y += 8f
+            val total = rows.sumOf { it.record.volume.toDoubleOrNull() ?: 0.0 }
+            val totalPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 11f; typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD) }
+            canvas.drawText("Total corrected volume: ${total.fmt()} m³", margin, y, totalPaint)
+        }
+        document.finishPage(page)
+    }
+    try {
+        context.contentResolver.openOutputStream(uri)?.use { document.writeTo(it) }
+            ?: error("Unable to open the selected file.")
+    } finally {
+        document.close()
+    }
+}
 
 private fun todayKey(): String = SimpleDateFormat("yyyy-MM-dd", Locale.US).format(Date())
 private fun parseDate(value: String): Calendar {
