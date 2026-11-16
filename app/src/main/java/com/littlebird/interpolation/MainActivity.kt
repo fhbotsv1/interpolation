@@ -611,6 +611,35 @@ private fun TankCalculatorScreen() {
                                 }
                             }
                         }
+                        if (recordMode == "Tank" && visibleRecords.isNotEmpty()) {
+                            val tankRows = allRecords.filter { it.record.tank.equals(recordTank, ignoreCase = true) }
+                            val startReading = tankRows.firstOrNull { it.date == contentRangeStart }
+                            val endReading = tankRows.firstOrNull { it.date == contentRangeEnd }
+                            val startVolume = startReading?.record?.volume?.toDoubleOrNull()
+                            val currentVolume = endReading?.record?.volume?.toDoubleOrNull()
+                            val change = if (startVolume != null && currentVolume != null) currentVolume - startVolume else null
+                            val tankInfo = tanks.firstOrNull { it.name.equals(recordTank, ignoreCase = true) }
+                            HorizontalDivider()
+                            Text("Tank summary", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
+                            Text("Summary for " + recordTank + " from " + contentRangeStart + " to " + contentRangeEnd + ".", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            Card(Modifier.fillMaxWidth()) {
+                                Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                                    Text(recordTank, style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold)
+                                    tankInfo?.content?.takeIf { it.isNotBlank() }?.let { OutputLine("Content", it) }
+                                    tankInfo?.totalCapacity?.takeIf { it.isNotBlank() }?.let { OutputLine("Total capacity", it + " m³") }
+                                    tankInfo?.maxSounding?.takeIf { it.isNotBlank() }?.let { OutputLine("Maximum sounding", it + " cm") }
+                                    tankInfo?.density?.takeIf { it.isNotBlank() }?.let { OutputLine("Content density", it + " kg/m³") }
+                                    OutputLine("Starting volume (" + contentRangeStart + ")", startVolume?.let { it.fmt() + " m³" } ?: "No reading")
+                                    OutputLine("Current volume (" + contentRangeEnd + ")", currentVolume?.let { it.fmt() + " m³" } ?: "No reading")
+                                    OutputLine("Total generated / change", change?.let { (if (it > 0) "+" else "") + it.fmt() + " m³" } ?: "Not available")
+                                    if (change == null) {
+                                        Text("A reading is required on both the start and end dates to calculate the change.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    } else {
+                                        Text("Change is calculated as end-date volume minus start-date volume.", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                }
+                            }
+                        }
                         if (recordMode == "Content" && visibleRecords.isNotEmpty()) {
                             val groupedByContent = visibleRecords.groupBy { recordContentFor(it.record, tanks).ifBlank { "Unspecified content" } }
                             HorizontalDivider()
