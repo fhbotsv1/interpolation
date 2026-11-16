@@ -288,8 +288,6 @@ private fun TankCalculatorScreen() {
                 val l2 = upperLevel?.let { if (it % 1.0 == 0.0) it.toLong().toString() else it.toString() } ?: referenceIntervalCm.toString()
                 val levelAtLowerRef = actualLevel != null && lowerLevel != null && kotlin.math.abs(actualLevel - lowerLevel) < 0.0000001
                 val levelAtUpperRef = actualLevel != null && upperLevel != null && kotlin.math.abs(actualLevel - upperLevel) < 0.0000001
-                val levelAtLowerRef = actualLevel != null && lowerLevel != null && kotlin.math.abs(actualLevel - lowerLevel) < 0.0000001
-                val levelAtUpperRef = actualLevel != null && upperLevel != null && kotlin.math.abs(actualLevel - upperLevel) < 0.0000001
                 Panel("2. Trim references") {
                     Field("Actual trim (m)", trim, { trim = it; result = null })
                     if (!actualTrimIsZero) {
