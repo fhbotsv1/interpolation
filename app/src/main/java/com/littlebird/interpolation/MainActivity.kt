@@ -118,17 +118,18 @@ private fun TankCalculatorScreen() {
     var exportDialogOpen by remember { mutableStateOf(false) }
     var exportRows by remember { mutableStateOf<List<DatedRecord>>(emptyList()) }
     var exportLabel by remember { mutableStateOf("Tank readings") }
+    var exportIncludeTotal by remember { mutableStateOf(true) }
     var exportMessage by remember { mutableStateOf<String?>(null) }
 
     val csvExportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")) { uri: Uri? ->
         if (uri != null) {
-            exportMessage = runCatching { writeReadingsXlsx(context, uri, exportRows, tanks, exportLabel); "Excel workbook saved." }
+            exportMessage = runCatching { writeReadingsXlsx(context, uri, exportRows, tanks, exportLabel, exportIncludeTotal); "Excel workbook saved." }
                 .getOrElse { "Could not save CSV: ${it.message ?: "Unknown error"}" }
         }
     }
     val pdfExportLauncher = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/pdf")) { uri: Uri? ->
         if (uri != null) {
-            exportMessage = runCatching { writeReadingsPdf(context, uri, exportRows, tanks, exportLabel); "PDF report saved." }
+            exportMessage = runCatching { writeReadingsPdf(context, uri, exportRows, tanks, exportLabel, exportIncludeTotal); "PDF report saved." }
                 .getOrElse { "Could not save PDF: ${it.message ?: "Unknown error"}" }
         }
     }
@@ -419,6 +420,7 @@ private fun TankCalculatorScreen() {
                         Text("${visibleRecords.size} reading(s)", fontWeight = FontWeight.SemiBold)
                         OutlinedButton(onClick = {
                             exportRows = visibleRecords
+                            exportIncludeTotal = recordMode != "Tank"
                             exportLabel = when (recordMode) {
                                 "Date" -> "Tank readings $selectedDate"
                                 "Tank" -> "Tank readings $recordTank"
@@ -631,7 +633,8 @@ private fun writeReadingsXlsx(
     uri: Uri,
     rows: List<DatedRecord>,
     tanks: List<TankInfo>,
-    reportTitle: String
+    reportTitle: String,
+    includeTotal: Boolean
 ) {
     val sheetRows = mutableListOf<List<String>>()
     sheetRows.add(listOf(reportTitle))
@@ -644,7 +647,7 @@ private fun writeReadingsXlsx(
             item.record.measurement, item.record.kind, item.record.trim, item.record.volume
         ))
     }
-    if (rows.isNotEmpty()) {
+    if (includeTotal && rows.isNotEmpty()) {
         sheetRows.add(emptyList())
         sheetRows.add(listOf("Total corrected volume (m³)", rows.sumOf { it.record.volume.toDoubleOrNull() ?: 0.0 }.fmt()))
     }
@@ -717,7 +720,8 @@ private fun writeReadingsPdf(
     uri: Uri,
     rows: List<DatedRecord>,
     tanks: List<TankInfo>,
-    reportTitle: String
+    reportTitle: String,
+    includeTotal: Boolean
 ) {
     val document = PdfDocument()
     val pageWidth = 842
@@ -767,7 +771,7 @@ private fun writeReadingsPdf(
             y += rowHeight
             canvas.drawLine(margin, y - 12f, pageWidth - margin, y - 12f, mutedPaint)
         }
-        if (pageIndex == pageCount - 1) {
+        if (includeTotal && pageIndex == pageCount - 1) {
             y += 8f
             val total = rows.sumOf { it.record.volume.toDoubleOrNull() ?: 0.0 }
             val totalPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { textSize = 11f; typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD) }
