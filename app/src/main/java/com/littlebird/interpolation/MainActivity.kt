@@ -402,7 +402,7 @@ private fun TankCalculatorScreen() {
                             volumeA, volumeB, volumeC, volumeD, heel.num(), h1.num(), h2.num(), hc1.num(), hc2.num())
                         result = if (isBunker) {
                             val density15 = tanks.firstOrNull { it.name.equals(tankName.trim(), true) }?.density15?.toDoubleOrNull()
-                                ?: error("Enter the tank density at 15°C in the Tanks section.")
+                                ?: throw IllegalArgumentException("Enter the tank density at 15°C in the Tanks section.")
                             require(density15 in 839.0..1075.0) { "The selected API/ASTM Table 54B fuel-oil correlation applies to density 839–1075 kg/m³ at 15°C. Check the density or product category." }
                             val temp = bunkerTemperature.num()
                             require(temp in -50.0..150.0) { "Temperature must be between -50°C and 150°C for this calculation." }
@@ -624,7 +624,7 @@ private fun TankCalculatorScreen() {
                                 if (recordMode == "Content") {
                                     TableCell("Capacity m³", true, 105.dp)
                                     TableCell("Max sounding cm", true, 125.dp)
-                                    TableCell("Density kg/m³", true, 115.dp)
+                                    TableCell(if (isBunker) "Density @15°C" else "Density kg/m³", true, 115.dp)
                                 }
                                 TableCell("Measured", true, 95.dp)
                                 TableCell("Type", true, 92.dp)
