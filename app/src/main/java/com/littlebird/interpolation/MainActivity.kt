@@ -123,7 +123,7 @@ private fun TankCalculatorScreen() {
     var recordTankMenuExpanded by remember { mutableStateOf(false) }
     var contentRangeStart by remember { mutableStateOf(dateOffsetKey(-30)) }
     var contentRangeEnd by remember { mutableStateOf(todayKey()) }
-    var selectedContentTanks by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var selectedContents by remember { mutableStateOf<Set<String>>(emptySet()) }
     var allRecords by remember { mutableStateOf(loadAllRecords(context)) }
     var exportDialogOpen by remember { mutableStateOf(false) }
     var exportRows by remember { mutableStateOf<List<DatedRecord>>(emptyList()) }
@@ -460,8 +460,9 @@ private fun TankCalculatorScreen() {
                         Row {
                             FilterChip(selected = recordMode == "Content", onClick = {
                                 recordMode = "Content"
-                                if (selectedContentTanks.isEmpty()) {
-                                    selectedContentTanks = (tanks.map { it.name } + allRecords.map { it.record.tank }).toSet()
+                                if (selectedContents.isEmpty()) {
+                                    selectedContents = (tanks.map { it.content } + allRecords.map { recordContentFor(it.record, tanks) })
+                                        .map { it.trim() }.filter { it.isNotEmpty() }.toSet()
                                 }
                             }, label = { Text("By content") })
                         }
@@ -484,9 +485,7 @@ private fun TankCalculatorScreen() {
                                 }
                             }
                         }
-                    }
-                    if (recordMode == "Content") {
-                        Text("Choose a date range. The summary compares the end date with the start date.")
+                        Text("Choose a date range to view readings for this tank.")
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             OutlinedButton(onClick = { chooseContentRangeDate(true) }, modifier = Modifier.weight(1f)) {
                                 Text("From: $contentRangeStart", maxLines = 1)
@@ -495,48 +494,56 @@ private fun TankCalculatorScreen() {
                                 Text("To: $contentRangeEnd", maxLines = 1)
                             }
                         }
-                        val selectableTankNames = (tanks.map { it.name } + allRecords.map { it.record.tank })
+                    }
+                    if (recordMode == "Content") {
+                        Text("Choose a date range and select the content(s) to view. The summary compares the end date with the start date.")
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(onClick = { chooseContentRangeDate(true) }, modifier = Modifier.weight(1f)) {
+                                Text("From: $contentRangeStart", maxLines = 1)
+                            }
+                            OutlinedButton(onClick = { chooseContentRangeDate(false) }, modifier = Modifier.weight(1f)) {
+                                Text("To: $contentRangeEnd", maxLines = 1)
+                            }
+                        }
+                        val selectableContents = (tanks.map { it.content } + allRecords.map { item ->
+                            recordContentFor(item.record, tanks)
+                        }).map { it.trim() }.filter { it.isNotEmpty() }
                             .distinctBy { it.lowercase(Locale.getDefault()) }
                             .sortedBy { it.lowercase(Locale.getDefault()) }
                         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                            Text("Select tanks (${selectedContentTanks.size} selected)", fontWeight = FontWeight.SemiBold)
+                            Text("Select content (" + selectedContents.size + " selected)", fontWeight = FontWeight.SemiBold)
                             Row {
-                                TextButton(onClick = { selectedContentTanks = selectableTankNames.toSet() }) { Text("All") }
-                                TextButton(onClick = { selectedContentTanks = emptySet() }) { Text("Clear") }
+                                TextButton(onClick = { selectedContents = selectableContents.toSet() }) { Text("All") }
+                                TextButton(onClick = { selectedContents = emptySet() }) { Text("Clear") }
                             }
                         }
                         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                            selectableTankNames.forEach { tank ->
+                            selectableContents.forEach { contentName ->
                                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                                     Checkbox(
-                                        checked = selectedContentTanks.contains(tank),
+                                        checked = selectedContents.any { it.equals(contentName, ignoreCase = true) },
                                         onCheckedChange = { checked ->
-                                            selectedContentTanks = if (checked) selectedContentTanks + tank
-                                                else selectedContentTanks - tank
+                                            selectedContents = if (checked) selectedContents + contentName
+                                                else selectedContents.filterNot { it.equals(contentName, ignoreCase = true) }.toSet()
                                         }
                                     )
-                                    Text(tank, modifier = Modifier.padding(top = 12.dp))
+                                    Text(contentName, modifier = Modifier.padding(top = 12.dp))
                                 }
                             }
                         }
-                        if (contentRangeStart > contentRangeEnd) {
-                            Text("The start date must be on or before the end date.", color = MaterialTheme.colorScheme.error)
+                        if (selectableContents.isEmpty()) {
+                            Text("No content names are available. Add content details in the Tanks tab.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        }
+                        if (selectedContents.isEmpty() && selectableContents.isNotEmpty()) {
+                            Text("Select at least one content.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                         }
                     }
-                    val visibleRecords = when (recordMode) {
-                        "Date" -> allRecords.filter { it.date == selectedDate }.sortedBy { it.record.tank.lowercase(Locale.getDefault()) }
-                        "Tank" -> allRecords.filter { it.record.tank.equals(recordTank, ignoreCase = true) }.sortedByDescending { it.date }
-                        else -> allRecords.filter { item ->
-                            item.date >= contentRangeStart && item.date <= contentRangeEnd &&
-                                selectedContentTanks.any { it.equals(item.record.tank, ignoreCase = true) }
-                        }.sortedWith(compareBy<DatedRecord> { it.date }.thenBy { it.record.tank.lowercase(Locale.getDefault()) })
-                    }
-                    if (recordMode == "Content" && contentRangeStart > contentRangeEnd) {
-                        Text("Correct the date range to view readings.", color = MaterialTheme.colorScheme.error)
-                    } else if (recordMode == "Content" && selectedContentTanks.isEmpty()) {
-                        Text("Select at least one tank to view its content summary.", color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        if ((recordMode == "Content" || recordMode == "Tank") && contentRangeStart > contentRangeEnd) {
+                        Text("The start date must be on or before the end date.", color = MaterialTheme.colorScheme.error)
+                    } else if (recordMode == "Content" && selectedContents.isEmpty()) {
+                        Text("Select at least one content to view its readings.", color = MaterialTheme.colorScheme.onSurfaceVariant)
                     } else if (visibleRecords.isEmpty()) {
-                        Text(when (recordMode) { "Date" -> "No readings saved for this date."; "Tank" -> "No readings found for this tank."; else -> "No readings found for the selected tanks and date range." }, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(when (recordMode) { "Date" -> "No readings saved for this date."; "Tank" -> "No readings found for this tank and date range."; else -> "No readings found for the selected content and date range." }, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     } else {
                         Text("${visibleRecords.size} reading(s)", fontWeight = FontWeight.SemiBold)
                         OutlinedButton(onClick = {
